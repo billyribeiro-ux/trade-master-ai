@@ -151,6 +151,7 @@
 
 	/* Focus visible */
 	:focus-visible {
-		@apply outline-none ring-2 ring-border-focus ring-offset-2 ring-offset-bg-primary;
+		outline: none;
+		box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--border-focus);
 	}
 }
