@@ -29,9 +29,9 @@ class ApiClient {
 
 		try {
 			const url = `${this.baseUrl}${API_PREFIX}${endpoint}`;
-			const headers: HeadersInit = {
+			const headers: Record<string, string> = {
 				'Content-Type': 'application/json',
-				...fetchConfig.headers,
+				...(fetchConfig.headers as Record<string, string>),
 			};
 
 			const accessToken = authStore.accessToken;
@@ -155,8 +155,8 @@ class ApiClient {
 
 		try {
 			const url = `${this.baseUrl}${API_PREFIX}${endpoint}`;
-			const headers: HeadersInit = {
-				...fetchConfig.headers,
+			const headers: Record<string, string> = {
+				...(fetchConfig.headers as Record<string, string>),
 			};
 
 			const accessToken = authStore.accessToken;

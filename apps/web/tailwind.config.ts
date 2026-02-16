@@ -56,10 +56,28 @@ export default {
 					hover: 'rgb(var(--border-hover) / <alpha-value>)'
 				},
 				grade: {
-					a: 'rgb(var(--grade-a) / <alpha-value>)',
-					b: 'rgb(var(--grade-b) / <alpha-value>)',
-					c: 'rgb(var(--grade-c) / <alpha-value>)',
-					d: 'rgb(var(--grade-d) / <alpha-value>)'
+					a: 'var(--grade-a)',
+					'a-bg': 'var(--grade-a-bg)',
+					b: 'var(--grade-b)',
+					'b-bg': 'var(--grade-b-bg)',
+					c: 'var(--grade-c)',
+					'c-bg': 'var(--grade-c-bg)',
+					d: 'var(--grade-d)',
+					'd-bg': 'var(--grade-d-bg)'
+				},
+				conviction: {
+					1: 'var(--conviction-1)',
+					2: 'var(--conviction-2)',
+					3: 'var(--conviction-3)',
+					4: 'var(--conviction-4)',
+					5: 'var(--conviction-5)'
+				},
+				score: {
+					0: 'var(--score-0)',
+					25: 'var(--score-25)',
+					50: 'var(--score-50)',
+					75: 'var(--score-75)',
+					100: 'var(--score-100)'
 				}
 			},
 			fontFamily: {

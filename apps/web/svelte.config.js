@@ -7,15 +7,15 @@ const config = {
 	kit: {
 		adapter: adapter(),
 		alias: {
-			$lib: './src/lib',
-			$components: './src/lib/components',
-			$stores: './src/lib/stores',
-			$services: './src/lib/services',
-			$utils: './src/lib/utils',
-			$types: './src/lib/types',
-			$config: './src/lib/config'
-		}
-	}
+			$lib: 'src/lib',
+			$components: 'src/lib/components',
+			$stores: 'src/lib/stores',
+			$services: 'src/lib/services',
+			$utils: 'src/lib/utils',
+			$types: 'src/lib/types',
+			$config: 'src/lib/config',
+		},
+	},
 };
 
 export default config;
