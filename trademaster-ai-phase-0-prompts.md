@@ -1587,3 +1587,4 @@ After Phase 0, the app compiles, the auth flow works end-to-end, the database is
 ## NEXT: PHASE 1 — CORE TRADE LOGGING
 
 Phase 1 prompts will be delivered in the next document. Phase 1 builds the trade entry form, trade list, trade detail view, screenshot upload, tagging, voice notes, CSV import, missed trade logging, and all related UI.
+
