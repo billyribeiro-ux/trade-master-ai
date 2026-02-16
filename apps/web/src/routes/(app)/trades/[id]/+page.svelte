@@ -15,9 +15,9 @@
 	import Input from '$lib/components/ui/input.svelte';
 	import Label from '$lib/components/ui/label.svelte';
 	import Textarea from '$lib/components/ui/textarea.svelte';
-	import Select from '$lib/components/ui/select.svelte';
+	// Select unused for now
 	import { toasts } from '$lib/stores/toast.svelte';
-	import { formatCurrency, formatPercent, formatDate, formatDateTime, formatDuration } from '$lib/utils/format';
+	import { formatCurrency, formatPercent, formatDateTime, formatDuration } from '$lib/utils/format';
 	import { onMount } from 'svelte';
 	import type { TradeWithDetails } from '$lib/types/trade';
 
@@ -40,7 +40,7 @@
 		followed_plan: false
 	});
 
-	const tradeId = $derived($page.params.id);
+	const tradeId = $derived($page.params.id ?? '');
 
 	onMount(async () => {
 		await loadTrade();
@@ -125,15 +125,15 @@
 		<div class="flex items-center justify-between">
 			<div>
 				<div class="flex items-center gap-3">
-					<h1 class="text-3xl font-bold">{trade.trade.symbol}</h1>
-					<Badge variant={getStatusVariant(trade.trade.status)}>
+					<h1 class="text-3xl font-bold">{trade!.trade.symbol}</h1>
+					<Badge variant={getStatusVariant(trade!.trade.status)}>
 						{#snippet children()}
-							{trade.trade.status}
+							{trade!.trade.status}
 						{/snippet}
 					</Badge>
 					<Badge variant="outline">
 						{#snippet children()}
-							{trade.trade.direction.toUpperCase()}
+							{trade!.trade.direction.toUpperCase()}
 						{/snippet}
 					</Badge>
 				</div>

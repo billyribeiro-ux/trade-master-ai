@@ -7,7 +7,7 @@
 	import CardHeader from '$lib/components/ui/card-header.svelte';
 	import CardTitle from '$lib/components/ui/card-title.svelte';
 	import CardContent from '$lib/components/ui/card-content.svelte';
-	import { formatCurrency, formatPercent } from '$lib/utils/format';
+	import { formatCurrency } from '$lib/utils/format';
 
 	// Position Size Calculator
 	let posForm = $state({ account_size: '', risk_percent: '', entry_price: '', stop_loss: '' });

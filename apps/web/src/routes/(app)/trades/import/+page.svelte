@@ -35,7 +35,7 @@
 				return;
 			}
 
-			headers = lines[0].split(',').map(h => h.trim());
+			headers = lines[0]?.split(',').map(h => h.trim()) ?? [];
 			csvData = lines.slice(1).map(line => {
 				return line.split(',').map(cell => cell.trim());
 			});

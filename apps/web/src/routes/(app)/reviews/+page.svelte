@@ -60,8 +60,8 @@
 		const end = new Date();
 		const start = new Date();
 		start.setDate(start.getDate() - 7);
-		form.period_start = start.toISOString().split('T')[0];
-		form.period_end = end.toISOString().split('T')[0];
+		form.period_start = start.toISOString().split('T')[0] ?? '';
+		form.period_end = end.toISOString().split('T')[0] ?? '';
 	});
 
 	async function loadReviews() {

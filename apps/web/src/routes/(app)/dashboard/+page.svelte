@@ -4,9 +4,8 @@
 	import CardHeader from '$lib/components/ui/card-header.svelte';
 	import CardTitle from '$lib/components/ui/card-title.svelte';
 	import CardContent from '$lib/components/ui/card-content.svelte';
-	import Badge from '$lib/components/ui/badge.svelte';
 	import Button from '$lib/components/ui/button.svelte';
-	import { formatCurrency, formatPercent } from '$lib/utils/format';
+	import { formatCurrency } from '$lib/utils/format';
 	import { onMount } from 'svelte';
 	import type { TradeStats } from '$lib/types/trade';
 

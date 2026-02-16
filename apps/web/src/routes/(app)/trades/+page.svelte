@@ -6,9 +6,9 @@
 	import Badge from '$lib/components/ui/badge.svelte';
 	import Select from '$lib/components/ui/select.svelte';
 	import Input from '$lib/components/ui/input.svelte';
-	import { formatCurrency, formatPercent, formatDate, formatDuration } from '$lib/utils/format';
+	import { formatCurrency, formatPercent, formatDate } from '$lib/utils/format';
 	import { onMount } from 'svelte';
-	import type { Trade, TradeListResponse } from '$lib/types/trade';
+	import type { Trade, TradeStatus } from '$lib/types/trade';
 
 	let trades = $state<Trade[]>([]);
 	let total = $state(0);
@@ -37,7 +37,7 @@
 				sort_by: sortBy,
 				sort_order: sortOrder,
 				filters: {
-					status: filters.status || undefined,
+					status: (filters.status || undefined) as TradeStatus | undefined,
 					direction: filters.direction as any,
 					asset_class: filters.asset_class as any,
 					symbol: filters.symbol || undefined,
