@@ -1,65 +1,188 @@
 use crate::config::Config;
 use crate::error::{AppError, AppResult};
-use crate::models::{ClaudeContent, ClaudeMessage, ClaudeRequest, ClaudeResponse, Trade};
+use crate::models::{ClaudeMessage, ClaudeRequest, ClaudeResponse, Trade};
 use reqwest::Client;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+const MAX_RETRIES: u32 = 2;
+const INITIAL_BACKOFF_MS: u64 = 500;
+const CIRCUIT_BREAKER_THRESHOLD: u64 = 5;
+const CIRCUIT_BREAKER_RESET_SECS: u64 = 60;
 
 pub struct AiService {
     api_key: Option<String>,
     client: Client,
+    consecutive_failures: AtomicU64,
+    last_failure_epoch: AtomicU64,
 }
 
 impl AiService {
     pub fn new(config: &Config) -> Self {
+        let client = Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .connect_timeout(Duration::from_secs(10))
+            .pool_max_idle_per_host(4)
+            .build()
+            .unwrap_or_else(|_| Client::new());
+
         Self {
             api_key: config.anthropic_api_key.clone(),
-            client: Client::new(),
+            client,
+            consecutive_failures: AtomicU64::new(0),
+            last_failure_epoch: AtomicU64::new(0),
         }
     }
 
-    pub async fn analyze_trade(&self, trade: &Trade) -> AppResult<String> {
-        let api_key = self.api_key.as_ref()
-            .ok_or_else(|| AppError::Internal("Anthropic API key not configured".to_string()))?;
+    /// Checks whether the circuit breaker is open (too many recent failures).
+    fn is_circuit_open(&self) -> bool {
+        let failures = self.consecutive_failures.load(Ordering::Relaxed);
+        if failures < CIRCUIT_BREAKER_THRESHOLD {
+            return false;
+        }
 
+        let last_fail = self.last_failure_epoch.load(Ordering::Relaxed);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        // If enough time has passed, allow a probe request through
+        if now.saturating_sub(last_fail) > CIRCUIT_BREAKER_RESET_SECS {
+            return false;
+        }
+
+        true
+    }
+
+    fn record_success(&self) {
+        self.consecutive_failures.store(0, Ordering::Relaxed);
+    }
+
+    fn record_failure(&self) {
+        self.consecutive_failures.fetch_add(1, Ordering::Relaxed);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.last_failure_epoch.store(now, Ordering::Relaxed);
+    }
+
+    pub async fn analyze_trade(&self, trade: &Trade) -> AppResult<String> {
         let prompt = self.build_trade_analysis_prompt(trade);
-        
-        let response = self.call_claude(api_key, &prompt).await?;
-        
+        let messages = vec![ClaudeMessage {
+            role: "user".to_string(),
+            content: prompt,
+        }];
+        let (response, _) = self.chat(messages).await?;
         Ok(response)
     }
 
+    /// Sends messages to the Claude API with retry logic and circuit breaker.
     pub async fn chat(&self, messages: Vec<ClaudeMessage>) -> AppResult<(String, i32)> {
-        let api_key = self.api_key.as_ref()
-            .ok_or_else(|| AppError::Internal("Anthropic API key not configured".to_string()))?;
+        let api_key = self.api_key.as_ref().ok_or_else(|| {
+            AppError::AiError("AI service is not configured. Set ANTHROPIC_API_KEY.".to_string())
+        })?;
 
-        let request = ClaudeRequest {
-            model: "claude-3-5-sonnet-20241022".to_string(),
+        if self.is_circuit_open() {
+            return Err(AppError::AiError(
+                "AI service is temporarily unavailable. Please try again later.".to_string(),
+            ));
+        }
+
+        let request_body = ClaudeRequest {
+            model: "claude-sonnet-4-20250514".to_string(),
             max_tokens: 4096,
             messages,
         };
 
-        let response = self.client
+        let mut last_error: Option<AppError> = None;
+
+        for attempt in 0..=MAX_RETRIES {
+            if attempt > 0 {
+                let backoff = Duration::from_millis(INITIAL_BACKOFF_MS * 2u64.pow(attempt - 1));
+                tokio::time::sleep(backoff).await;
+                tracing::info!(attempt, "Retrying Claude API request");
+            }
+
+            match self.send_request(api_key, &request_body).await {
+                Ok(result) => {
+                    self.record_success();
+                    return Ok(result);
+                }
+                Err(e) => {
+                    tracing::warn!(attempt, error = %e, "Claude API request failed");
+
+                    // Don't retry on client errors (4xx) except 429 (rate limit)
+                    if matches!(&e, AppError::Validation(_)) {
+                        return Err(e);
+                    }
+
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        self.record_failure();
+        Err(last_error.unwrap_or_else(|| {
+            AppError::AiError("AI request failed after retries".to_string())
+        }))
+    }
+
+    /// Performs a single HTTP request to the Claude API.
+    async fn send_request(
+        &self,
+        api_key: &str,
+        request_body: &ClaudeRequest,
+    ) -> AppResult<(String, i32)> {
+        let response = self
+            .client
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", api_key)
             .header("anthropic-version", "2023-06-01")
             .header("content-type", "application/json")
-            .json(&request)
+            .json(request_body)
             .send()
             .await
-            .map_err(|e| AppError::External(format!("Claude API request failed: {}", e)))?;
+            .map_err(|e| {
+                if e.is_timeout() {
+                    AppError::AiError("AI request timed out. Please try again.".to_string())
+                } else if e.is_connect() {
+                    AppError::AiError("Could not reach AI service.".to_string())
+                } else {
+                    AppError::AiError(format!("AI request failed: {}", e))
+                }
+            })?;
 
-        if !response.status().is_success() {
-            let status = response.status();
+        let status = response.status();
+
+        if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(AppError::External(format!(
-                "Claude API error ({}): {}",
-                status, error_text
-            )));
+
+            // Log the full error server-side, return a safe message to the client
+            tracing::error!(status = %status, body = %error_text, "Claude API error");
+
+            return match status.as_u16() {
+                401 => Err(AppError::AiError(
+                    "AI service authentication failed. Check API key.".to_string(),
+                )),
+                429 => Err(AppError::AiError(
+                    "AI rate limit reached. Please wait and try again.".to_string(),
+                )),
+                400 => Err(AppError::Validation(
+                    "Invalid request to AI service.".to_string(),
+                )),
+                _ => Err(AppError::AiError(
+                    "AI service returned an error. Please try again.".to_string(),
+                )),
+            };
         }
 
-        let claude_response: ClaudeResponse = response
-            .json()
-            .await
-            .map_err(|e| AppError::External(format!("Failed to parse Claude response: {}", e)))?;
+        let claude_response: ClaudeResponse = response.json().await.map_err(|e| {
+            tracing::error!(error = %e, "Failed to parse Claude response");
+            AppError::AiError("Unexpected response from AI service.".to_string())
+        })?;
 
         let text = claude_response
             .content
@@ -67,19 +190,15 @@ impl AiService {
             .map(|c| c.text.clone())
             .unwrap_or_default();
 
+        if text.is_empty() {
+            return Err(AppError::AiError(
+                "AI returned an empty response.".to_string(),
+            ));
+        }
+
         let tokens = claude_response.usage.input_tokens + claude_response.usage.output_tokens;
 
         Ok((text, tokens))
-    }
-
-    async fn call_claude(&self, api_key: &str, prompt: &str) -> AppResult<String> {
-        let messages = vec![ClaudeMessage {
-            role: "user".to_string(),
-            content: prompt.to_string(),
-        }];
-
-        let (response, _) = self.chat(messages).await?;
-        Ok(response)
     }
 
     fn build_trade_analysis_prompt(&self, trade: &Trade) -> String {

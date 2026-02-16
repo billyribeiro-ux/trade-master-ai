@@ -19,7 +19,59 @@ pub async fn create_trade(
     auth_user: AuthUser,
     Json(req): Json<CreateTradeRequest>,
 ) -> AppResult<Json<Trade>> {
-    // Validate trade data
+    // --- Input validation ---
+    let symbol = req.symbol.trim().to_uppercase();
+    if symbol.is_empty() || symbol.len() > 20 {
+        return Err(AppError::Validation(
+            "Symbol must be between 1 and 20 characters".to_string(),
+        ));
+    }
+
+    if req.entry_price <= Decimal::ZERO {
+        return Err(AppError::Validation(
+            "Entry price must be positive".to_string(),
+        ));
+    }
+
+    if req.quantity <= Decimal::ZERO {
+        return Err(AppError::Validation(
+            "Quantity must be positive".to_string(),
+        ));
+    }
+
+    if let Some(sl) = req.stop_loss {
+        if sl <= Decimal::ZERO {
+            return Err(AppError::Validation(
+                "Stop loss must be positive".to_string(),
+            ));
+        }
+    }
+
+    if let Some(tp) = req.take_profit {
+        if tp <= Decimal::ZERO {
+            return Err(AppError::Validation(
+                "Take profit must be positive".to_string(),
+            ));
+        }
+    }
+
+    if let Some(ref thesis) = req.thesis {
+        if thesis.len() > 10_000 {
+            return Err(AppError::Validation(
+                "Thesis must be 10,000 characters or fewer".to_string(),
+            ));
+        }
+    }
+
+    if let Some(ref setup) = req.setup_name {
+        if setup.len() > 200 {
+            return Err(AppError::Validation(
+                "Setup name must be 200 characters or fewer".to_string(),
+            ));
+        }
+    }
+
+    // Validate stop loss / take profit relative to direction
     TradeCalculationService::validate_trade_data(
         req.entry_price,
         req.quantity,
@@ -28,16 +80,16 @@ pub async fn create_trade(
         &req.direction,
     )?;
 
-    // Calculate risk amount if stop loss provided and risk_amount not provided
-    let risk_amount = if req.risk_amount.is_none() && req.stop_loss.is_some() {
-        Some(TradeCalculationService::calculate_risk_from_stop(
+    // Calculate risk amount from stop loss when not explicitly provided
+    let risk_amount = match (req.risk_amount, req.stop_loss) {
+        (Some(ra), _) => Some(ra),
+        (None, Some(sl)) => Some(TradeCalculationService::calculate_risk_from_stop(
             &req.direction,
             req.entry_price,
-            req.stop_loss.unwrap(),
+            sl,
             req.quantity,
-        ))
-    } else {
-        req.risk_amount
+        )),
+        _ => None,
     };
 
     let trade = sqlx::query_as::<_, Trade>(
@@ -54,7 +106,7 @@ pub async fn create_trade(
         "#,
     )
     .bind(auth_user.user_id)
-    .bind(&req.symbol)
+    .bind(&symbol)
     .bind(&req.direction)
     .bind(&req.asset_class)
     .bind(req.entry_date)
@@ -76,6 +128,13 @@ pub async fn create_trade(
     .fetch_one(pool.as_ref())
     .await?;
 
+    tracing::info!(
+        trade_id = %trade.id,
+        symbol = %trade.symbol,
+        direction = ?trade.direction,
+        "Trade created"
+    );
+
     Ok(Json(trade))
 }
 
@@ -84,7 +143,7 @@ pub async fn get_trade(
     auth_user: AuthUser,
     Path(trade_id): Path<Uuid>,
 ) -> AppResult<Json<TradeWithDetails>> {
-    // Get trade
+    // Fetch the trade first — fail fast if it doesn't exist or doesn't belong to the user
     let trade = sqlx::query_as::<_, Trade>(
         r#"
         SELECT * FROM trades
@@ -97,43 +156,40 @@ pub async fn get_trade(
     .await?
     .ok_or_else(|| AppError::NotFound("Trade not found".to_string()))?;
 
-    // Get tags
-    let tags = sqlx::query_as(
-        r#"
-        SELECT t.id, t.name, t.color, t.category
-        FROM tags t
-        INNER JOIN trade_tags tt ON t.id = tt.tag_id
-        WHERE tt.trade_id = $1
-        ORDER BY t.name
-        "#,
-    )
-    .bind(trade_id)
-    .fetch_all(pool.as_ref())
-    .await?;
+    // Fetch related data concurrently — eliminates sequential N+1 pattern
+    let (tags, legs, media) = tokio::try_join!(
+        sqlx::query_as::<_, TradeTag>(
+            r#"
+            SELECT t.id, t.name, t.color, t.category
+            FROM tags t
+            INNER JOIN trade_tags tt ON t.id = tt.tag_id
+            WHERE tt.trade_id = $1
+            ORDER BY t.name
+            "#,
+        )
+        .bind(trade_id)
+        .fetch_all(pool.as_ref()),
 
-    // Get legs
-    let legs = sqlx::query_as::<_, TradeLeg>(
-        r#"
-        SELECT * FROM trade_legs
-        WHERE trade_id = $1
-        ORDER BY leg_number
-        "#,
-    )
-    .bind(trade_id)
-    .fetch_all(pool.as_ref())
-    .await?;
+        sqlx::query_as::<_, TradeLeg>(
+            r#"
+            SELECT * FROM trade_legs
+            WHERE trade_id = $1
+            ORDER BY leg_number
+            "#,
+        )
+        .bind(trade_id)
+        .fetch_all(pool.as_ref()),
 
-    // Get media
-    let media = sqlx::query_as::<_, TradeMedia>(
-        r#"
-        SELECT * FROM trade_media
-        WHERE trade_id = $1
-        ORDER BY created_at
-        "#,
-    )
-    .bind(trade_id)
-    .fetch_all(pool.as_ref())
-    .await?;
+        sqlx::query_as::<_, TradeMedia>(
+            r#"
+            SELECT * FROM trade_media
+            WHERE trade_id = $1
+            ORDER BY created_at
+            "#,
+        )
+        .bind(trade_id)
+        .fetch_all(pool.as_ref()),
+    )?;
 
     Ok(Json(TradeWithDetails {
         trade,
@@ -141,6 +197,48 @@ pub async fn get_trade(
         legs,
         media,
     }))
+}
+
+/// Validates that a sort column name is one of the allowed trade table columns.
+/// Returns the validated column name or an error. This prevents SQL injection
+/// by whitelisting rather than sanitizing.
+fn validate_sort_column(input: &str) -> AppResult<&'static str> {
+    match input {
+        "entry_date" => Ok("entry_date"),
+        "exit_date" => Ok("exit_date"),
+        "symbol" => Ok("symbol"),
+        "direction" => Ok("direction"),
+        "asset_class" => Ok("asset_class"),
+        "status" => Ok("status"),
+        "entry_price" => Ok("entry_price"),
+        "exit_price" => Ok("exit_price"),
+        "quantity" => Ok("quantity"),
+        "pnl" => Ok("pnl"),
+        "net_pnl" => Ok("net_pnl"),
+        "pnl_percent" => Ok("pnl_percent"),
+        "r_multiple" => Ok("r_multiple"),
+        "hold_time_minutes" => Ok("hold_time_minutes"),
+        "created_at" => Ok("created_at"),
+        "updated_at" => Ok("updated_at"),
+        _ => Err(AppError::Validation(format!(
+            "Invalid sort column '{}'. Allowed: entry_date, exit_date, symbol, direction, \
+             asset_class, status, entry_price, exit_price, quantity, pnl, net_pnl, \
+             pnl_percent, r_multiple, hold_time_minutes, created_at, updated_at",
+            input
+        ))),
+    }
+}
+
+/// Validates sort direction. Only "asc" and "desc" are allowed.
+fn validate_sort_order(input: &str) -> AppResult<&'static str> {
+    match input.to_lowercase().as_str() {
+        "asc" => Ok("ASC"),
+        "desc" => Ok("DESC"),
+        _ => Err(AppError::Validation(format!(
+            "Invalid sort order '{}'. Allowed: asc, desc",
+            input
+        ))),
+    }
 }
 
 pub async fn list_trades(
@@ -152,9 +250,17 @@ pub async fn list_trades(
     let per_page = query.per_page.unwrap_or(50).clamp(1, 100);
     let offset = (page - 1) * per_page;
 
-    // Build WHERE clause
+    // Validate sort parameters against whitelist — prevents SQL injection
+    let sort_column = validate_sort_column(
+        query.sort_by.as_deref().unwrap_or("entry_date"),
+    )?;
+    let sort_direction = validate_sort_order(
+        query.sort_order.as_deref().unwrap_or("desc"),
+    )?;
+
+    // Build WHERE clause using parameterized conditions only
     let mut conditions = vec!["user_id = $1".to_string()];
-    let mut param_count = 1;
+    let mut param_count: i32 = 1;
 
     if query.filters.status.is_some() {
         param_count += 1;
@@ -195,89 +301,52 @@ pub async fn list_trades(
 
     let where_clause = conditions.join(" AND ");
 
-    // Build ORDER BY clause
-    let sort_by = query.sort_by.as_deref().unwrap_or("entry_date");
-    let sort_order = query.sort_order.as_deref().unwrap_or("desc");
-    let order_clause = format!("{} {}", sort_by, sort_order);
+    // ORDER BY uses only validated static strings — safe from injection
+    let order_clause = format!("{} {}", sort_column, sort_direction);
 
-    // Count total
-    let count_query = format!("SELECT COUNT(*) FROM trades WHERE {}", where_clause);
-    let mut count_q = sqlx::query_scalar::<_, i64>(&count_query).bind(auth_user.user_id);
-
-    if let Some(status) = &query.filters.status {
-        count_q = count_q.bind(status);
-    }
-    if let Some(direction) = &query.filters.direction {
-        count_q = count_q.bind(direction);
-    }
-    if let Some(asset_class) = &query.filters.asset_class {
-        count_q = count_q.bind(asset_class);
-    }
-    if let Some(symbol) = &query.filters.symbol {
-        count_q = count_q.bind(format!("%{}%", symbol));
-    }
-    if let Some(setup) = &query.filters.setup_name {
-        count_q = count_q.bind(format!("%{}%", setup));
-    }
-    if let Some(conviction) = &query.filters.conviction {
-        count_q = count_q.bind(conviction);
-    }
-    if let Some(paper) = query.filters.is_paper_trade {
-        count_q = count_q.bind(paper);
-    }
-    if let Some(from) = query.filters.from_date {
-        count_q = count_q.bind(from);
-    }
-    if let Some(to) = query.filters.to_date {
-        count_q = count_q.bind(to);
+    // Helper closure: binds all active filter params to a query builder.
+    // We use a macro-style approach to avoid duplicating the bind chain.
+    macro_rules! bind_filters {
+        ($q:expr) => {{
+            let mut q = $q.bind(auth_user.user_id);
+            if let Some(ref v) = query.filters.status { q = q.bind(v); }
+            if let Some(ref v) = query.filters.direction { q = q.bind(v); }
+            if let Some(ref v) = query.filters.asset_class { q = q.bind(v); }
+            if let Some(ref v) = query.filters.symbol { q = q.bind(format!("%{}%", v)); }
+            if let Some(ref v) = query.filters.setup_name { q = q.bind(format!("%{}%", v)); }
+            if let Some(ref v) = query.filters.conviction { q = q.bind(v); }
+            if let Some(v) = query.filters.is_paper_trade { q = q.bind(v); }
+            if let Some(v) = query.filters.from_date { q = q.bind(v); }
+            if let Some(v) = query.filters.to_date { q = q.bind(v); }
+            q
+        }};
     }
 
-    let total = count_q.fetch_one(pool.as_ref()).await?;
+    // Count total matching rows
+    let count_sql = format!("SELECT COUNT(*) FROM trades WHERE {}", where_clause);
+    let total = bind_filters!(sqlx::query_scalar::<_, i64>(&count_sql))
+        .fetch_one(pool.as_ref())
+        .await?;
 
-    // Fetch trades
-    let trades_query = format!(
+    // Fetch paginated trades
+    let trades_sql = format!(
         "SELECT * FROM trades WHERE {} ORDER BY {} LIMIT ${} OFFSET ${}",
         where_clause,
         order_clause,
         param_count + 1,
         param_count + 2
     );
+    let trades = bind_filters!(sqlx::query_as::<_, Trade>(&trades_sql))
+        .bind(per_page)
+        .bind(offset)
+        .fetch_all(pool.as_ref())
+        .await?;
 
-    let mut trades_q = sqlx::query_as::<_, Trade>(&trades_query).bind(auth_user.user_id);
-
-    if let Some(status) = &query.filters.status {
-        trades_q = trades_q.bind(status);
-    }
-    if let Some(direction) = &query.filters.direction {
-        trades_q = trades_q.bind(direction);
-    }
-    if let Some(asset_class) = &query.filters.asset_class {
-        trades_q = trades_q.bind(asset_class);
-    }
-    if let Some(symbol) = &query.filters.symbol {
-        trades_q = trades_q.bind(format!("%{}%", symbol));
-    }
-    if let Some(setup) = &query.filters.setup_name {
-        trades_q = trades_q.bind(format!("%{}%", setup));
-    }
-    if let Some(conviction) = &query.filters.conviction {
-        trades_q = trades_q.bind(conviction);
-    }
-    if let Some(paper) = query.filters.is_paper_trade {
-        trades_q = trades_q.bind(paper);
-    }
-    if let Some(from) = query.filters.from_date {
-        trades_q = trades_q.bind(from);
-    }
-    if let Some(to) = query.filters.to_date {
-        trades_q = trades_q.bind(to);
-    }
-
-    trades_q = trades_q.bind(per_page).bind(offset);
-
-    let trades = trades_q.fetch_all(pool.as_ref()).await?;
-
-    let total_pages = (total as f64 / per_page as f64).ceil() as i64;
+    let total_pages = if per_page > 0 {
+        (total + per_page - 1) / per_page  // ceiling division without floating point
+    } else {
+        0
+    };
 
     Ok(Json(TradeListResponse {
         trades,

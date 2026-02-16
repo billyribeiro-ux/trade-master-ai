@@ -5,6 +5,7 @@ use axum::{
 };
 use serde::Serialize;
 use std::fmt;
+use uuid::Uuid;
 
 #[derive(Debug)]
 pub enum AppError {
@@ -50,28 +51,49 @@ struct ErrorDetail {
     message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     details: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    trace_id: Option<String>,
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        let (status, code, message) = match &self {
-            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, "BAD_REQUEST", msg.clone()),
-            AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, "UNAUTHORIZED", msg.clone()),
-            AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, "FORBIDDEN", msg.clone()),
-            AppError::NotFound(msg) => (StatusCode::NOT_FOUND, "NOT_FOUND", msg.clone()),
-            AppError::Conflict(msg) => (StatusCode::CONFLICT, "CONFLICT", msg.clone()),
+        let trace_id = Uuid::new_v4().to_string();
+
+        let (status, code, message, include_trace) = match &self {
+            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, "BAD_REQUEST", msg.clone(), false),
+            AppError::Unauthorized(_) => (
+                StatusCode::UNAUTHORIZED,
+                "UNAUTHORIZED",
+                "Authentication required".to_string(),
+                false,
+            ),
+            AppError::Forbidden(_) => (
+                StatusCode::FORBIDDEN,
+                "FORBIDDEN",
+                "You do not have permission to perform this action".to_string(),
+                false,
+            ),
+            AppError::NotFound(msg) => (StatusCode::NOT_FOUND, "NOT_FOUND", msg.clone(), false),
+            AppError::Conflict(msg) => (StatusCode::CONFLICT, "CONFLICT", msg.clone(), false),
             AppError::Internal(msg) => {
-                tracing::error!("Internal error: {}", msg);
+                tracing::error!(trace_id = %trace_id, error = %msg, "Internal server error");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "INTERNAL_ERROR",
-                    "An internal error occurred".to_string(),
+                    "An internal error occurred. If this persists, contact support.".to_string(),
+                    true,
                 )
             }
-            AppError::Validation(msg) => (StatusCode::UNPROCESSABLE_ENTITY, "VALIDATION_ERROR", msg.clone()),
-            AppError::RateLimited(msg) => (StatusCode::TOO_MANY_REQUESTS, "RATE_LIMITED", msg.clone()),
-            AppError::AiError(msg) => (StatusCode::SERVICE_UNAVAILABLE, "AI_ERROR", msg.clone()),
-            AppError::BrokerError(msg) => (StatusCode::BAD_GATEWAY, "BROKER_ERROR", msg.clone()),
+            AppError::Validation(msg) => (StatusCode::UNPROCESSABLE_ENTITY, "VALIDATION_ERROR", msg.clone(), false),
+            AppError::RateLimited(msg) => (StatusCode::TOO_MANY_REQUESTS, "RATE_LIMITED", msg.clone(), false),
+            AppError::AiError(msg) => {
+                tracing::warn!(trace_id = %trace_id, error = %msg, "AI service error");
+                (StatusCode::SERVICE_UNAVAILABLE, "AI_ERROR", msg.clone(), true)
+            }
+            AppError::BrokerError(msg) => {
+                tracing::warn!(trace_id = %trace_id, error = %msg, "Broker error");
+                (StatusCode::BAD_GATEWAY, "BROKER_ERROR", msg.clone(), true)
+            }
         };
 
         let body = Json(ErrorResponse {
@@ -79,6 +101,7 @@ impl IntoResponse for AppError {
                 code: code.to_string(),
                 message,
                 details: None,
+                trace_id: if include_trace { Some(trace_id) } else { None },
             },
         });
 
@@ -92,20 +115,30 @@ impl From<sqlx::Error> for AppError {
         match err {
             sqlx::Error::RowNotFound => AppError::NotFound("Resource not found".to_string()),
             sqlx::Error::Database(db_err) => {
-                if let Some(constraint) = db_err.constraint() {
-                    AppError::Conflict(format!("Constraint violation: {}", constraint))
+                if db_err.is_unique_violation() {
+                    AppError::Conflict("A resource with that identifier already exists".to_string())
+                } else if db_err.is_foreign_key_violation() {
+                    AppError::BadRequest("Referenced resource does not exist".to_string())
+                } else if db_err.is_check_violation() {
+                    AppError::Validation("Data constraint check failed".to_string())
                 } else {
+                    // Log the real error server-side, return a generic message
+                    tracing::error!(error = %db_err, "Unhandled database error");
                     AppError::Internal(format!("Database error: {}", db_err))
                 }
             }
-            _ => AppError::Internal(format!("Database error: {}", err)),
+            _ => {
+                tracing::error!(error = %err, "Unhandled database error");
+                AppError::Internal(format!("Database error: {}", err))
+            }
         }
     }
 }
 
 impl From<reqwest::Error> for AppError {
     fn from(err: reqwest::Error) -> Self {
-        AppError::Internal(format!("HTTP client error: {}", err))
+        tracing::error!(error = %err, "HTTP client error");
+        AppError::Internal("An external service request failed".to_string())
     }
 }
 
@@ -117,13 +150,15 @@ impl From<anyhow::Error> for AppError {
 
 impl From<jsonwebtoken::errors::Error> for AppError {
     fn from(err: jsonwebtoken::errors::Error) -> Self {
-        AppError::Unauthorized(format!("JWT error: {}", err))
+        tracing::debug!(error = %err, "JWT validation failed");
+        AppError::Unauthorized("Invalid or expired token".to_string())
     }
 }
 
 impl From<argon2::password_hash::Error> for AppError {
     fn from(err: argon2::password_hash::Error) -> Self {
-        AppError::Internal(format!("Password hashing error: {}", err))
+        tracing::error!(error = %err, "Password hashing error");
+        AppError::Internal("Authentication processing error".to_string())
     }
 }
 

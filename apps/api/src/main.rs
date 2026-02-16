@@ -6,7 +6,7 @@ mod routes;
 mod services;
 
 use crate::config::Config;
-use crate::routes::{ai_review, analytics, auth, csv, health, planning, tags, trades};
+use crate::routes::{ai_review, analytics, auth, csv, health, planning, playbook, psychology, risk, tags, trades};
 use crate::services::{AiService, AuthService};
 use axum::{
     routing::{delete, get, post, put},
@@ -119,6 +119,25 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/ai/reviews/:id", get(ai_review::get_ai_review))
         .route("/api/v1/ai/reviews/:id", delete(ai_review::delete_ai_review))
         .route("/api/v1/ai/reviews/:id/chat", post(ai_review::continue_chat))
+        // Risk Management routes
+        .route("/api/v1/risk/position-size", post(risk::calculate_position_size))
+        .route("/api/v1/risk/risk-reward", post(risk::calculate_risk_reward))
+        .route("/api/v1/risk/kelly", post(risk::calculate_kelly))
+        .route("/api/v1/risk/portfolio-heat", post(risk::calculate_portfolio_heat))
+        // Psychology routes
+        .route("/api/v1/psychology/mood-logs", post(psychology::create_mood_log))
+        .route("/api/v1/psychology/mood-logs", get(psychology::list_mood_logs))
+        .route("/api/v1/psychology/mood-logs/:id", get(psychology::get_mood_log))
+        .route("/api/v1/psychology/mood-logs/:id", put(psychology::update_mood_log))
+        .route("/api/v1/psychology/mood-logs/:id", delete(psychology::delete_mood_log))
+        .route("/api/v1/psychology/insights", get(psychology::get_psychology_insights))
+        // Playbook routes
+        .route("/api/v1/playbook", post(playbook::create_playbook_entry))
+        .route("/api/v1/playbook", get(playbook::list_playbook_entries))
+        .route("/api/v1/playbook/performance", get(playbook::get_playbook_performance))
+        .route("/api/v1/playbook/:id", get(playbook::get_playbook_entry))
+        .route("/api/v1/playbook/:id", put(playbook::update_playbook_entry))
+        .route("/api/v1/playbook/:id", delete(playbook::delete_playbook_entry))
         // Add state
         .with_state(pool.clone())
         .with_state(auth_service.clone())

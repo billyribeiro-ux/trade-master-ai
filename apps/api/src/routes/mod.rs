@@ -6,6 +6,9 @@ pub mod csv;
 pub mod analytics;
 pub mod planning;
 pub mod ai_review;
+pub mod risk;
+pub mod psychology;
+pub mod playbook;
 
 pub use auth::*;
 pub use health::*;
@@ -15,3 +18,6 @@ pub use csv::*;
 pub use analytics::*;
 pub use planning::*;
 pub use ai_review::*;
+pub use risk::*;
+pub use psychology::*;
+pub use playbook::*;
