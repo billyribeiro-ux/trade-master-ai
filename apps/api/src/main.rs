@@ -4,10 +4,12 @@ mod middleware;
 mod models;
 mod routes;
 mod services;
+mod state;
 
 use crate::config::Config;
 use crate::routes::{ai_review, analytics, auth, csv, health, planning, playbook, psychology, review, risk, tags, trades};
 use crate::services::{AiService, AuthService};
+use crate::state::AppState;
 use axum::{
     routing::{delete, get, post, put},
     Router,
@@ -144,10 +146,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/reviews/:id", get(review::get_review))
         .route("/api/v1/reviews/:id", put(review::update_review))
         .route("/api/v1/reviews/:id", delete(review::delete_review))
-        // Add state
-        .with_state(pool.clone())
-        .with_state(auth_service.clone())
-        .with_state(ai_service.clone())
+        // Add unified state
+        .with_state(AppState {
+            pool: pool.clone(),
+            auth_service: auth_service.clone(),
+            ai_service: ai_service.clone(),
+        })
         // Add middleware
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http());

@@ -29,9 +29,15 @@ pub struct UpdateTagRequest {
     pub category: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, FromRow, Serialize)]
 pub struct TagWithCount {
-    #[serde(flatten)]
-    pub tag: Tag,
+    pub id: Uuid,
+    pub user_id: Option<Uuid>,
+    pub name: String,
+    pub color: String,
+    pub category: Option<String>,
+    pub is_system: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
     pub trade_count: i64,
 }

@@ -15,34 +15,38 @@
 	import DialogFooter from '$lib/components/ui/dialog-footer.svelte';
 	import Spinner from '$lib/components/ui/spinner.svelte';
 	import { toasts } from '$lib/stores/toast.svelte';
-	import { formatCurrency, formatPercent } from '$lib/utils/format';
+	import { formatCurrency } from '$lib/utils/format';
 	import { onMount } from 'svelte';
 
-	interface PlaybookEntry {
+	interface PlaybookSetup {
 		id: string;
 		name: string;
 		description: string | null;
-		entry_criteria: string[] | null;
-		exit_criteria: string[] | null;
-		risk_rules: string[] | null;
-		asset_classes: string[] | null;
-		timeframes: string[] | null;
+		criteria: Record<string, unknown> | null;
+		expected_r_min: number | null;
+		expected_r_max: number | null;
+		min_conviction: number | null;
+		preferred_timeframe: string | null;
+		market_regimes: string[] | null;
+		common_mistakes: string | null;
+		trade_count: number;
+		win_rate: number | null;
+		avg_r: number | null;
+		profit_factor: number | null;
+		total_pnl: number | null;
 		is_active: boolean;
 	}
 
 	interface Performance {
 		setup_name: string;
-		total_trades: number;
-		winning_trades: number;
-		win_rate: number;
-		total_pnl: number;
-		avg_pnl: number;
-		avg_r_multiple: number | null;
-		largest_win: number;
-		largest_loss: number;
+		trade_count: number;
+		win_rate: number | null;
+		avg_r: number | null;
+		profit_factor: number | null;
+		total_pnl: number | null;
 	}
 
-	let entries = $state<PlaybookEntry[]>([]);
+	let entries = $state<PlaybookSetup[]>([]);
 	let performance = $state<Performance[]>([]);
 	let loading = $state(true);
 	let saving = $state(false);
@@ -52,9 +56,15 @@
 	let form = $state({
 		name: '',
 		description: '',
-		entry_criteria: '',
-		exit_criteria: '',
-		risk_rules: '',
+		expected_r_min: '',
+		expected_r_max: '',
+		min_conviction: '7',
+		preferred_timeframe: '',
+		market_regimes: '',
+		common_mistakes: '',
+		criteria_entry: '',
+		criteria_exit: '',
+		criteria_risk: '',
 	});
 
 	onMount(async () => {
@@ -64,7 +74,7 @@
 	async function loadEntries() {
 		loading = true;
 		try {
-			entries = await apiClient.get<PlaybookEntry[]>('/api/v1/playbook') ?? [];
+			entries = await apiClient.get<PlaybookSetup[]>('/api/v1/playbook') ?? [];
 		} catch { /* silent */ }
 		loading = false;
 	}
@@ -83,16 +93,33 @@
 
 		saving = true;
 		try {
+			const criteria: Record<string, string[]> = {};
+			const entryLines = form.criteria_entry.split('\n').filter(Boolean);
+			const exitLines = form.criteria_exit.split('\n').filter(Boolean);
+			const riskLines = form.criteria_risk.split('\n').filter(Boolean);
+			if (entryLines.length) criteria.entry = entryLines;
+			if (exitLines.length) criteria.exit = exitLines;
+			if (riskLines.length) criteria.risk = riskLines;
+
+			const regimes = form.market_regimes
+				.split(',')
+				.map((r: string) => r.trim())
+				.filter((r: string) => r.length > 0);
+
 			await apiClient.post('/api/v1/playbook', {
 				name: form.name.trim(),
 				description: form.description || null,
-				entry_criteria: form.entry_criteria ? form.entry_criteria.split('\n').filter(Boolean) : null,
-				exit_criteria: form.exit_criteria ? form.exit_criteria.split('\n').filter(Boolean) : null,
-				risk_rules: form.risk_rules ? form.risk_rules.split('\n').filter(Boolean) : null,
+				criteria: Object.keys(criteria).length > 0 ? criteria : null,
+				expected_r_min: form.expected_r_min ? parseFloat(form.expected_r_min) : null,
+				expected_r_max: form.expected_r_max ? parseFloat(form.expected_r_max) : null,
+				min_conviction: form.min_conviction ? parseInt(form.min_conviction) : null,
+				preferred_timeframe: form.preferred_timeframe || null,
+				market_regimes: regimes.length > 0 ? regimes : null,
+				common_mistakes: form.common_mistakes || null,
 			});
 			toasts.success('Setup added to playbook');
 			dialogOpen = false;
-			form = { name: '', description: '', entry_criteria: '', exit_criteria: '', risk_rules: '' };
+			form = { name: '', description: '', expected_r_min: '', expected_r_max: '', min_conviction: '7', preferred_timeframe: '', market_regimes: '', common_mistakes: '', criteria_entry: '', criteria_exit: '', criteria_risk: '' };
 			await loadEntries();
 		} catch (error) {
 			toasts.error('Failed to create', error instanceof Error ? error.message : '');
@@ -109,6 +136,12 @@
 		} catch {
 			toasts.error('Failed to delete');
 		}
+	}
+
+	function getCriteriaList(criteria: Record<string, unknown> | null, key: string): string[] {
+		if (!criteria || !criteria[key]) return [];
+		const val = criteria[key];
+		return Array.isArray(val) ? val : [];
 	}
 </script>
 
@@ -170,11 +203,28 @@
 								<p class="text-sm text-muted-foreground">{entry.description}</p>
 							{/if}
 
-							{#if entry.entry_criteria && entry.entry_criteria.length > 0}
+							<div class="flex flex-wrap gap-2 text-xs">
+								{#if entry.preferred_timeframe}
+									<Badge variant="outline">{#snippet children()}{entry.preferred_timeframe}{/snippet}</Badge>
+								{/if}
+								{#if entry.expected_r_min != null || entry.expected_r_max != null}
+									<Badge variant="outline">{#snippet children()}R: {entry.expected_r_min ?? '?'} - {entry.expected_r_max ?? '?'}{/snippet}</Badge>
+								{/if}
+								{#if entry.min_conviction != null}
+									<Badge variant="outline">{#snippet children()}Min conviction: {entry.min_conviction}/10{/snippet}</Badge>
+								{/if}
+								{#if entry.market_regimes}
+									{#each entry.market_regimes as regime}
+										<Badge variant="secondary">{#snippet children()}{regime}{/snippet}</Badge>
+									{/each}
+								{/if}
+							</div>
+
+							{#if getCriteriaList(entry.criteria, 'entry').length > 0}
 								<div>
 									<p class="text-xs font-semibold uppercase text-muted-foreground mb-1">Entry Criteria</p>
 									<ul class="text-sm space-y-1">
-										{#each entry.entry_criteria as criterion}
+										{#each getCriteriaList(entry.criteria, 'entry') as criterion}
 											<li class="flex items-start gap-2">
 												<span class="text-green-600 mt-0.5">&#10003;</span>
 												<span>{criterion}</span>
@@ -184,11 +234,11 @@
 								</div>
 							{/if}
 
-							{#if entry.exit_criteria && entry.exit_criteria.length > 0}
+							{#if getCriteriaList(entry.criteria, 'exit').length > 0}
 								<div>
 									<p class="text-xs font-semibold uppercase text-muted-foreground mb-1">Exit Criteria</p>
 									<ul class="text-sm space-y-1">
-										{#each entry.exit_criteria as criterion}
+										{#each getCriteriaList(entry.criteria, 'exit') as criterion}
 											<li class="flex items-start gap-2">
 												<span class="text-blue-600 mt-0.5">&#8594;</span>
 												<span>{criterion}</span>
@@ -198,17 +248,37 @@
 								</div>
 							{/if}
 
-							{#if entry.risk_rules && entry.risk_rules.length > 0}
+							{#if getCriteriaList(entry.criteria, 'risk').length > 0}
 								<div>
 									<p class="text-xs font-semibold uppercase text-muted-foreground mb-1">Risk Rules</p>
 									<ul class="text-sm space-y-1">
-										{#each entry.risk_rules as rule}
+										{#each getCriteriaList(entry.criteria, 'risk') as rule}
 											<li class="flex items-start gap-2">
 												<span class="text-orange-600 mt-0.5">&#9888;</span>
 												<span>{rule}</span>
 											</li>
 										{/each}
 									</ul>
+								</div>
+							{/if}
+
+							{#if entry.common_mistakes}
+								<div>
+									<p class="text-xs font-semibold uppercase text-muted-foreground mb-1">Common Mistakes</p>
+									<p class="text-sm text-muted-foreground">{entry.common_mistakes}</p>
+								</div>
+							{/if}
+
+							{#if entry.trade_count > 0}
+								<div class="pt-2 border-t flex gap-4 text-xs text-muted-foreground">
+									<span>{entry.trade_count} trades</span>
+									{#if entry.win_rate != null}<span>{Number(entry.win_rate).toFixed(1)}% win</span>{/if}
+									{#if entry.avg_r != null}<span>{Number(entry.avg_r).toFixed(2)}R avg</span>{/if}
+									{#if entry.total_pnl != null}
+										<span class={Number(entry.total_pnl) >= 0 ? 'text-green-600' : 'text-destructive'}>
+											{formatCurrency(Number(entry.total_pnl))}
+										</span>
+									{/if}
 								</div>
 							{/if}
 						</CardContent>
@@ -230,26 +300,22 @@
 							<th class="text-left p-3 font-medium">Setup</th>
 							<th class="text-right p-3 font-medium">Trades</th>
 							<th class="text-right p-3 font-medium">Win Rate</th>
-							<th class="text-right p-3 font-medium">Total P&L</th>
-							<th class="text-right p-3 font-medium">Avg P&L</th>
 							<th class="text-right p-3 font-medium">Avg R</th>
-							<th class="text-right p-3 font-medium">Best</th>
-							<th class="text-right p-3 font-medium">Worst</th>
+							<th class="text-right p-3 font-medium">Profit Factor</th>
+							<th class="text-right p-3 font-medium">Total P&L</th>
 						</tr>
 					</thead>
 					<tbody>
 						{#each performance as p}
 							<tr class="border-b hover:bg-muted/50">
 								<td class="p-3 font-medium">{p.setup_name}</td>
-								<td class="p-3 text-right">{p.total_trades}</td>
-								<td class="p-3 text-right">{p.win_rate.toFixed(1)}%</td>
-								<td class="p-3 text-right {p.total_pnl >= 0 ? 'text-green-600' : 'text-destructive'}">
-									{formatCurrency(p.total_pnl)}
+								<td class="p-3 text-right">{p.trade_count}</td>
+								<td class="p-3 text-right">{p.win_rate != null ? Number(p.win_rate).toFixed(1) + '%' : '-'}</td>
+								<td class="p-3 text-right">{p.avg_r != null ? Number(p.avg_r).toFixed(2) + 'R' : '-'}</td>
+								<td class="p-3 text-right">{p.profit_factor != null ? Number(p.profit_factor).toFixed(2) : '-'}</td>
+								<td class="p-3 text-right {(p.total_pnl ?? 0) >= 0 ? 'text-green-600' : 'text-destructive'}">
+									{p.total_pnl != null ? formatCurrency(Number(p.total_pnl)) : '-'}
 								</td>
-								<td class="p-3 text-right">{formatCurrency(p.avg_pnl)}</td>
-								<td class="p-3 text-right">{p.avg_r_multiple?.toFixed(2) ?? '-'}R</td>
-								<td class="p-3 text-right text-green-600">{formatCurrency(p.largest_win)}</td>
-								<td class="p-3 text-right text-destructive">{formatCurrency(p.largest_loss)}</td>
 							</tr>
 						{/each}
 					</tbody>
@@ -272,19 +338,47 @@
 			</div>
 			<div class="space-y-2">
 				<Label for="setup-desc">Description</Label>
-				<Textarea id="setup-desc" bind:value={form.description} placeholder="Describe this setup..." rows={3} />
+				<Textarea id="setup-desc" bind:value={form.description} placeholder="Describe this setup..." rows={2} />
+			</div>
+			<div class="grid grid-cols-2 gap-4">
+				<div class="space-y-2">
+					<Label for="r-min">Expected R Min</Label>
+					<Input id="r-min" type="number" step="0.1" bind:value={form.expected_r_min} placeholder="1.5" />
+				</div>
+				<div class="space-y-2">
+					<Label for="r-max">Expected R Max</Label>
+					<Input id="r-max" type="number" step="0.1" bind:value={form.expected_r_max} placeholder="3.0" />
+				</div>
+			</div>
+			<div class="grid grid-cols-2 gap-4">
+				<div class="space-y-2">
+					<Label for="conviction">Min Conviction (1-10)</Label>
+					<Input id="conviction" type="number" min="1" max="10" bind:value={form.min_conviction} />
+				</div>
+				<div class="space-y-2">
+					<Label for="timeframe">Preferred Timeframe</Label>
+					<Input id="timeframe" bind:value={form.preferred_timeframe} placeholder="5m, 15m, 1h..." />
+				</div>
+			</div>
+			<div class="space-y-2">
+				<Label for="regimes">Market Regimes (comma-separated)</Label>
+				<Input id="regimes" bind:value={form.market_regimes} placeholder="trending, range-bound, volatile..." />
 			</div>
 			<div class="space-y-2">
 				<Label for="entry-criteria">Entry Criteria (one per line)</Label>
-				<Textarea id="entry-criteria" bind:value={form.entry_criteria} placeholder="Price above VWAP&#10;Volume increasing&#10;Clean flag pattern" rows={4} />
+				<Textarea id="entry-criteria" bind:value={form.criteria_entry} placeholder="Price above VWAP&#10;Volume increasing&#10;Clean flag pattern" rows={3} />
 			</div>
 			<div class="space-y-2">
 				<Label for="exit-criteria">Exit Criteria (one per line)</Label>
-				<Textarea id="exit-criteria" bind:value={form.exit_criteria} placeholder="Target hit&#10;Trailing stop triggered&#10;End of day" rows={3} />
+				<Textarea id="exit-criteria" bind:value={form.criteria_exit} placeholder="Target hit&#10;Trailing stop triggered" rows={2} />
 			</div>
 			<div class="space-y-2">
-				<Label for="risk-rules">Risk Rules (one per line)</Label>
-				<Textarea id="risk-rules" bind:value={form.risk_rules} placeholder="Max 1% risk&#10;Stop below flag low&#10;No averaging down" rows={3} />
+				<Label for="risk-criteria">Risk Rules (one per line)</Label>
+				<Textarea id="risk-criteria" bind:value={form.criteria_risk} placeholder="Max 1% risk&#10;Stop below flag low" rows={2} />
+			</div>
+			<div class="space-y-2">
+				<Label for="mistakes">Common Mistakes</Label>
+				<Textarea id="mistakes" bind:value={form.common_mistakes} placeholder="Things to watch out for with this setup..." rows={2} />
 			</div>
 		</div>
 		<DialogFooter>

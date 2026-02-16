@@ -4,10 +4,10 @@ use axum::{extract::State, Json};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::Serialize;
-use sqlx::PgPool;
+use sqlx::{FromRow, PgPool};
 use std::sync::Arc;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, FromRow)]
 pub struct EquityCurvePoint {
     pub date: DateTime<Utc>,
     pub cumulative_pnl: Decimal,
@@ -111,7 +111,7 @@ pub async fn get_win_loss_distribution(
     }))
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, FromRow)]
 pub struct SetupPerformance {
     pub setup_name: String,
     pub trade_count: i64,
@@ -162,7 +162,7 @@ pub struct TimeBasedAnalytics {
     pub monthly: Vec<MonthlyPerformance>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, FromRow)]
 pub struct HourlyPerformance {
     pub hour: i32,
     pub trade_count: i64,
@@ -170,7 +170,7 @@ pub struct HourlyPerformance {
     pub avg_pnl: Decimal,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, FromRow)]
 pub struct DailyPerformance {
     pub day_of_week: i32,
     pub day_name: String,
@@ -179,7 +179,7 @@ pub struct DailyPerformance {
     pub avg_pnl: Decimal,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, FromRow)]
 pub struct MonthlyPerformance {
     pub month: String,
     pub trade_count: i64,

@@ -1,8 +1,8 @@
 use crate::error::{AppError, AppResult};
 use crate::models::{
     AuthUser, CloseTradeRequest, CreateTradeLegRequest, CreateTradeRequest, Trade, TradeLeg,
-    TradeListQuery, TradeListResponse, TradeMedia, TradeStats, TradeStatus, TradeWithDetails,
-    UpdateTradeRequest,
+    TradeListQuery, TradeListResponse, TradeMedia, TradeStats, TradeStatus, TradeTag,
+    TradeWithDetails, UpdateTradeRequest,
 };
 use crate::services::TradeCalculationService;
 use axum::{

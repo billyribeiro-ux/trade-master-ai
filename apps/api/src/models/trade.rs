@@ -265,7 +265,7 @@ pub struct TradeListResponse {
     pub total_pages: i64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, FromRow)]
 pub struct TradeStats {
     pub total_trades: i64,
     pub winning_trades: i64,

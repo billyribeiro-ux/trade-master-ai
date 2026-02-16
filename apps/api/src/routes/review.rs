@@ -7,10 +7,21 @@ use axum::{
     extract::{Path, Query, State},
     Json,
 };
+use rust_decimal::Decimal;
 use serde::Deserialize;
-use sqlx::PgPool;
+use sqlx::{FromRow, PgPool};
 use std::sync::Arc;
 use uuid::Uuid;
+
+#[derive(Debug, FromRow)]
+struct TradeStats {
+    total_trades: Option<i32>,
+    winning_trades: Option<i32>,
+    losing_trades: Option<i32>,
+    win_rate: Option<Decimal>,
+    total_pnl: Option<Decimal>,
+    avg_r_multiple: Option<Decimal>,
+}
 
 pub async fn create_review(
     State(pool): State<Arc<PgPool>>,
@@ -20,23 +31,23 @@ pub async fn create_review(
     validate_review_request(&req).map_err(|e| AppError::Validation(e))?;
 
     // Auto-compute trade statistics for the period
-    let stats = sqlx::query_as::<_, (Option<i32>, Option<i32>, Option<i32>, Option<rust_decimal::Decimal>, Option<rust_decimal::Decimal>, Option<rust_decimal::Decimal>)>(
+    let stats = sqlx::query_as::<_, TradeStats>(
         r#"
         SELECT
-            COUNT(*)::INTEGER,
-            COUNT(*) FILTER (WHERE net_pnl > 0)::INTEGER,
-            COUNT(*) FILTER (WHERE net_pnl <= 0)::INTEGER,
+            COUNT(*)::INTEGER as total_trades,
+            COUNT(*) FILTER (WHERE net_pnl > 0)::INTEGER as winning_trades,
+            COUNT(*) FILTER (WHERE net_pnl <= 0)::INTEGER as losing_trades,
             CASE WHEN COUNT(*) > 0
                 THEN CAST(COUNT(*) FILTER (WHERE net_pnl > 0) AS DECIMAL) / COUNT(*) * 100
                 ELSE NULL
-            END,
-            SUM(net_pnl),
-            AVG(r_multiple)
+            END as win_rate,
+            SUM(net_pnl) as total_pnl,
+            AVG(r_multiple) as avg_r_multiple
         FROM trades
         WHERE user_id = $1
           AND status = 'closed'
-          AND exit_date >= $2
-          AND exit_date <= $3
+          AND DATE(exit_date) >= $2
+          AND DATE(exit_date) <= $3
         "#,
     )
     .bind(auth_user.user_id)
@@ -70,12 +81,12 @@ pub async fn create_review(
     .bind(&req.review_type)
     .bind(req.period_start)
     .bind(req.period_end)
-    .bind(stats.0)
-    .bind(stats.1)
-    .bind(stats.2)
-    .bind(stats.3)
-    .bind(stats.4)
-    .bind(stats.5)
+    .bind(stats.total_trades)
+    .bind(stats.winning_trades)
+    .bind(stats.losing_trades)
+    .bind(stats.win_rate)
+    .bind(stats.total_pnl)
+    .bind(stats.avg_r_multiple)
     .bind(&req.what_went_well)
     .bind(&req.what_to_improve)
     .bind(&req.key_lessons)
@@ -90,7 +101,13 @@ pub async fn create_review(
     .bind(req.execution_rating)
     .bind(req.overall_rating)
     .fetch_one(pool.as_ref())
-    .await?;
+    .await
+    .map_err(|e| match e {
+        sqlx::Error::Database(ref db_err) if db_err.is_unique_violation() => {
+            AppError::Conflict("A review for this period already exists".to_string())
+        }
+        _ => AppError::from(e),
+    })?;
 
     tracing::info!(
         review_id = %review.id,
@@ -116,7 +133,6 @@ pub async fn get_review(
     .await?
     .ok_or_else(|| AppError::NotFound("Review not found".to_string()))?;
 
-    // Fetch enrichment data concurrently
     let (top_setups, daily_pnl) = tokio::try_join!(
         sqlx::query_as::<_, SetupSummary>(
             r#"
@@ -132,8 +148,8 @@ pub async fn get_review(
             FROM trades
             WHERE user_id = $1
               AND status = 'closed'
-              AND exit_date >= $2
-              AND exit_date <= $3
+              AND DATE(exit_date) >= $2
+              AND DATE(exit_date) <= $3
             GROUP BY setup_name
             ORDER BY total_pnl DESC
             LIMIT 10
@@ -147,15 +163,15 @@ pub async fn get_review(
         sqlx::query_as::<_, DailyPnl>(
             r#"
             SELECT
-                DATE_TRUNC('day', exit_date) as trade_date,
+                DATE(exit_date) as trade_date,
                 COALESCE(SUM(net_pnl), 0) as pnl,
                 COUNT(*) as trade_count
             FROM trades
             WHERE user_id = $1
               AND status = 'closed'
-              AND exit_date >= $2
-              AND exit_date <= $3
-            GROUP BY DATE_TRUNC('day', exit_date)
+              AND DATE(exit_date) >= $2
+              AND DATE(exit_date) <= $3
+            GROUP BY DATE(exit_date)
             ORDER BY trade_date
             "#,
         )
@@ -187,12 +203,7 @@ pub async fn list_reviews(
 
     let reviews = if let Some(ref review_type) = query.review_type {
         sqlx::query_as::<_, PeriodicReview>(
-            r#"
-            SELECT * FROM periodic_reviews
-            WHERE user_id = $1 AND review_type = $2
-            ORDER BY period_end DESC
-            LIMIT $3
-            "#,
+            "SELECT * FROM periodic_reviews WHERE user_id = $1 AND review_type = $2 ORDER BY period_end DESC LIMIT $3",
         )
         .bind(auth_user.user_id)
         .bind(review_type)
@@ -201,12 +212,7 @@ pub async fn list_reviews(
         .await?
     } else {
         sqlx::query_as::<_, PeriodicReview>(
-            r#"
-            SELECT * FROM periodic_reviews
-            WHERE user_id = $1
-            ORDER BY period_end DESC
-            LIMIT $2
-            "#,
+            "SELECT * FROM periodic_reviews WHERE user_id = $1 ORDER BY period_end DESC LIMIT $2",
         )
         .bind(auth_user.user_id)
         .bind(limit)
@@ -223,7 +229,6 @@ pub async fn update_review(
     Path(review_id): Path<Uuid>,
     Json(req): Json<UpdateReviewRequest>,
 ) -> AppResult<Json<PeriodicReview>> {
-    // Validate ratings if provided
     if let Some(r) = req.discipline_rating {
         validate_rating(r, "discipline_rating").map_err(|e| AppError::Validation(e))?;
     }
@@ -237,7 +242,6 @@ pub async fn update_review(
         validate_rating(r, "overall_rating").map_err(|e| AppError::Validation(e))?;
     }
 
-    // Verify ownership
     sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM periodic_reviews WHERE id = $1 AND user_id = $2)",
     )

@@ -9,7 +9,6 @@
 	import CardTitle from '$lib/components/ui/card-title.svelte';
 	import CardContent from '$lib/components/ui/card-content.svelte';
 	import Badge from '$lib/components/ui/badge.svelte';
-	import Checkbox from '$lib/components/ui/checkbox.svelte';
 	import Spinner from '$lib/components/ui/spinner.svelte';
 	import { toasts } from '$lib/stores/toast.svelte';
 	import { formatCurrency, formatDate } from '$lib/utils/format';
@@ -19,30 +18,20 @@
 		id: string;
 		log_date: string;
 		pre_market_mood: number | null;
-		during_trading_mood: number | null;
 		post_market_mood: number | null;
-		emotional_labels: string[] | null;
+		stress_level: number | null;
+		confidence_level: number | null;
 		sleep_quality: number | null;
-		sleep_hours: number | null;
-		exercised: boolean | null;
-		meditated: boolean | null;
-		journal_entry: string | null;
-		felt_fomo: boolean;
-		felt_revenge: boolean;
-		felt_overconfident: boolean;
-		felt_fearful: boolean;
+		emotions: string[] | null;
+		notes: string | null;
 	}
 
 	interface Insights {
 		avg_pre_market_mood: number | null;
-		avg_during_mood: number | null;
-		avg_post_mood: number | null;
+		avg_post_market_mood: number | null;
+		avg_stress_level: number | null;
+		avg_confidence_level: number | null;
 		avg_sleep_quality: number | null;
-		avg_sleep_hours: number | null;
-		fomo_count: number;
-		revenge_count: number;
-		overconfident_count: number;
-		fearful_count: number;
 		total_logs: number;
 		high_mood_avg_pnl: number | null;
 		low_mood_avg_pnl: number | null;
@@ -58,17 +47,12 @@
 
 	let form = $state({
 		pre_market_mood: '7',
-		during_trading_mood: '',
 		post_market_mood: '',
+		stress_level: '5',
+		confidence_level: '7',
 		sleep_quality: '7',
-		sleep_hours: '7',
-		journal_entry: '',
-		felt_fomo: false,
-		felt_revenge: false,
-		felt_overconfident: false,
-		felt_fearful: false,
-		exercised: false,
-		meditated: false,
+		emotions: '',
+		notes: '',
 	});
 
 	onMount(async () => {
@@ -91,20 +75,21 @@
 	async function saveMoodLog() {
 		saving = true;
 		try {
+			const today = new Date().toISOString().split('T')[0];
+			const emotionList = form.emotions
+				.split(',')
+				.map((e: string) => e.trim())
+				.filter((e: string) => e.length > 0);
+
 			await apiClient.post('/api/v1/psychology/mood-logs', {
-				log_date: new Date().toISOString(),
+				log_date: today,
 				pre_market_mood: form.pre_market_mood ? parseInt(form.pre_market_mood) : null,
-				during_trading_mood: form.during_trading_mood ? parseInt(form.during_trading_mood) : null,
 				post_market_mood: form.post_market_mood ? parseInt(form.post_market_mood) : null,
+				stress_level: form.stress_level ? parseInt(form.stress_level) : null,
+				confidence_level: form.confidence_level ? parseInt(form.confidence_level) : null,
 				sleep_quality: form.sleep_quality ? parseInt(form.sleep_quality) : null,
-				sleep_hours: form.sleep_hours ? parseFloat(form.sleep_hours) : null,
-				journal_entry: form.journal_entry || null,
-				felt_fomo: form.felt_fomo,
-				felt_revenge: form.felt_revenge,
-				felt_overconfident: form.felt_overconfident,
-				felt_fearful: form.felt_fearful,
-				exercised: form.exercised,
-				meditated: form.meditated,
+				emotions: emotionList.length > 0 ? emotionList : null,
+				notes: form.notes || null,
 			});
 			toasts.success('Mood log saved');
 			await Promise.all([loadLogs(), loadInsights()]);
@@ -115,7 +100,7 @@
 		}
 	}
 
-	function moodColor(score: number | null): string {
+	function scoreColor(score: number | null): string {
 		if (!score) return 'text-muted-foreground';
 		if (score >= 8) return 'text-green-600';
 		if (score >= 6) return 'text-yellow-600';
@@ -123,12 +108,8 @@
 		return 'text-red-600';
 	}
 
-	function moodEmoji(score: number | null): string {
-		if (!score) return '-';
-		if (score >= 8) return `${score}/10`;
-		if (score >= 6) return `${score}/10`;
-		if (score >= 4) return `${score}/10`;
-		return `${score}/10`;
+	function scoreDisplay(score: number | null): string {
+		return score != null ? `${score}/10` : '-';
 	}
 </script>
 
@@ -158,61 +139,51 @@
 	{#if activeTab === 'log'}
 		<div class="grid gap-6 md:grid-cols-2">
 			<Card>
-				<CardHeader><CardTitle>Mood & Energy</CardTitle></CardHeader>
+				<CardHeader><CardTitle>Mood & State</CardTitle></CardHeader>
 				<CardContent class="space-y-4">
 					<div class="space-y-2">
 						<Label for="pre-mood">Pre-Market Mood (1-10)</Label>
 						<Input id="pre-mood" type="number" min="1" max="10" bind:value={form.pre_market_mood} />
 					</div>
 					<div class="space-y-2">
-						<Label for="during-mood">During Trading Mood (1-10)</Label>
-						<Input id="during-mood" type="number" min="1" max="10" bind:value={form.during_trading_mood} />
-					</div>
-					<div class="space-y-2">
 						<Label for="post-mood">Post-Market Mood (1-10)</Label>
 						<Input id="post-mood" type="number" min="1" max="10" bind:value={form.post_market_mood} />
+					</div>
+					<div class="space-y-2">
+						<Label for="stress">Stress Level (1-10)</Label>
+						<Input id="stress" type="number" min="1" max="10" bind:value={form.stress_level} />
+					</div>
+					<div class="space-y-2">
+						<Label for="confidence">Confidence Level (1-10)</Label>
+						<Input id="confidence" type="number" min="1" max="10" bind:value={form.confidence_level} />
 					</div>
 					<div class="space-y-2">
 						<Label for="sleep-q">Sleep Quality (1-10)</Label>
 						<Input id="sleep-q" type="number" min="1" max="10" bind:value={form.sleep_quality} />
 					</div>
-					<div class="space-y-2">
-						<Label for="sleep-h">Sleep Hours</Label>
-						<Input id="sleep-h" type="number" step="0.5" bind:value={form.sleep_hours} />
-					</div>
 				</CardContent>
 			</Card>
 
 			<Card>
-				<CardHeader><CardTitle>Tilt Indicators & Habits</CardTitle></CardHeader>
+				<CardHeader><CardTitle>Emotions & Notes</CardTitle></CardHeader>
 				<CardContent class="space-y-4">
-					<div class="space-y-3">
-						<p class="text-sm font-medium">Did you experience any of these today?</p>
-						<Checkbox bind:checked={form.felt_fomo} label="FOMO (Fear of Missing Out)" />
-						<Checkbox bind:checked={form.felt_revenge} label="Revenge Trading Urge" />
-						<Checkbox bind:checked={form.felt_overconfident} label="Overconfidence" />
-						<Checkbox bind:checked={form.felt_fearful} label="Fear / Hesitation" />
+					<div class="space-y-2">
+						<Label for="emotions">Emotions (comma-separated)</Label>
+						<Input id="emotions" bind:value={form.emotions} placeholder="calm, focused, anxious..." />
+						<p class="text-xs text-muted-foreground">e.g. calm, focused, anxious, excited, frustrated</p>
 					</div>
-					<hr />
-					<div class="space-y-3">
-						<p class="text-sm font-medium">Positive habits</p>
-						<Checkbox bind:checked={form.exercised} label="Exercised today" />
-						<Checkbox bind:checked={form.meditated} label="Meditated today" />
+					<div class="space-y-2">
+						<Label for="notes">Notes</Label>
+						<Textarea
+							id="notes"
+							bind:value={form.notes}
+							placeholder="How are you feeling about your trading today?"
+							rows={8}
+						/>
 					</div>
 				</CardContent>
 			</Card>
 		</div>
-
-		<Card>
-			<CardHeader><CardTitle>Journal Entry</CardTitle></CardHeader>
-			<CardContent>
-				<Textarea
-					bind:value={form.journal_entry}
-					placeholder="How are you feeling about your trading today? What's on your mind?"
-					rows={6}
-				/>
-			</CardContent>
-		</Card>
 
 		<Button onclick={saveMoodLog} disabled={saving}>
 			{#snippet children()}
@@ -230,22 +201,24 @@
 				{#each logs as log}
 					<Card>
 						<CardContent class="py-4">
-							<div class="flex items-center justify-between">
+							<div class="flex items-center justify-between flex-wrap gap-2">
 								<span class="font-medium">{formatDate(log.log_date)}</span>
 								<div class="flex gap-4 text-sm">
-									<span>Pre: <span class={moodColor(log.pre_market_mood)}>{moodEmoji(log.pre_market_mood)}</span></span>
-									<span>During: <span class={moodColor(log.during_trading_mood)}>{moodEmoji(log.during_trading_mood)}</span></span>
-									<span>Post: <span class={moodColor(log.post_market_mood)}>{moodEmoji(log.post_market_mood)}</span></span>
+									<span>Pre: <span class={scoreColor(log.pre_market_mood)}>{scoreDisplay(log.pre_market_mood)}</span></span>
+									<span>Post: <span class={scoreColor(log.post_market_mood)}>{scoreDisplay(log.post_market_mood)}</span></span>
+									<span>Stress: <span class={scoreColor(log.stress_level)}>{scoreDisplay(log.stress_level)}</span></span>
+									<span>Confidence: <span class={scoreColor(log.confidence_level)}>{scoreDisplay(log.confidence_level)}</span></span>
 								</div>
-								<div class="flex gap-1">
-									{#if log.felt_fomo}<Badge variant="destructive">{#snippet children()}FOMO{/snippet}</Badge>{/if}
-									{#if log.felt_revenge}<Badge variant="destructive">{#snippet children()}Revenge{/snippet}</Badge>{/if}
-									{#if log.felt_overconfident}<Badge variant="warning">{#snippet children()}Overconfident{/snippet}</Badge>{/if}
-									{#if log.felt_fearful}<Badge variant="warning">{#snippet children()}Fearful{/snippet}</Badge>{/if}
+								<div class="flex gap-1 flex-wrap">
+									{#if log.emotions}
+										{#each log.emotions as emotion}
+											<Badge variant="secondary">{#snippet children()}{emotion}{/snippet}</Badge>
+										{/each}
+									{/if}
 								</div>
 							</div>
-							{#if log.journal_entry}
-								<p class="text-sm text-muted-foreground mt-2 line-clamp-2">{log.journal_entry}</p>
+							{#if log.notes}
+								<p class="text-sm text-muted-foreground mt-2 line-clamp-2">{log.notes}</p>
 							{/if}
 						</CardContent>
 					</Card>
@@ -259,7 +232,7 @@
 				Log at least a few days of mood data to see insights.
 			</p>
 		{:else}
-			<div class="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+			<div class="grid gap-6 md:grid-cols-2 lg:grid-cols-5">
 				<Card>
 					<CardContent class="pt-6 text-center">
 						<div class="text-3xl font-bold">{insights.avg_pre_market_mood?.toFixed(1) ?? '-'}</div>
@@ -268,14 +241,20 @@
 				</Card>
 				<Card>
 					<CardContent class="pt-6 text-center">
-						<div class="text-3xl font-bold">{insights.avg_sleep_quality?.toFixed(1) ?? '-'}</div>
-						<div class="text-sm text-muted-foreground mt-1">Avg Sleep Quality</div>
+						<div class="text-3xl font-bold">{insights.avg_post_market_mood?.toFixed(1) ?? '-'}</div>
+						<div class="text-sm text-muted-foreground mt-1">Avg Post-Market Mood</div>
 					</CardContent>
 				</Card>
 				<Card>
 					<CardContent class="pt-6 text-center">
-						<div class="text-3xl font-bold">{insights.avg_sleep_hours?.toFixed(1) ?? '-'}h</div>
-						<div class="text-sm text-muted-foreground mt-1">Avg Sleep Hours</div>
+						<div class="text-3xl font-bold">{insights.avg_stress_level?.toFixed(1) ?? '-'}</div>
+						<div class="text-sm text-muted-foreground mt-1">Avg Stress Level</div>
+					</CardContent>
+				</Card>
+				<Card>
+					<CardContent class="pt-6 text-center">
+						<div class="text-3xl font-bold">{insights.avg_confidence_level?.toFixed(1) ?? '-'}</div>
+						<div class="text-sm text-muted-foreground mt-1">Avg Confidence</div>
 					</CardContent>
 				</Card>
 				<Card>
@@ -288,51 +267,34 @@
 
 			<div class="grid gap-6 md:grid-cols-2">
 				<Card>
-					<CardHeader><CardTitle>Tilt Frequency</CardTitle></CardHeader>
-					<CardContent class="space-y-3">
-						<div class="flex justify-between text-sm">
-							<span>FOMO episodes</span>
-							<span class="font-semibold text-destructive">{insights.fomo_count}</span>
-						</div>
-						<div class="flex justify-between text-sm">
-							<span>Revenge trading urges</span>
-							<span class="font-semibold text-destructive">{insights.revenge_count}</span>
-						</div>
-						<div class="flex justify-between text-sm">
-							<span>Overconfidence episodes</span>
-							<span class="font-semibold text-orange-600">{insights.overconfident_count}</span>
-						</div>
-						<div class="flex justify-between text-sm">
-							<span>Fear/hesitation episodes</span>
-							<span class="font-semibold text-orange-600">{insights.fearful_count}</span>
-						</div>
-					</CardContent>
-				</Card>
-
-				<Card>
 					<CardHeader><CardTitle>Mood vs Performance</CardTitle></CardHeader>
 					<CardContent class="space-y-3">
 						<div class="flex justify-between text-sm">
-							<span>Avg P&L on high mood days</span>
+							<span>Avg P&L on high mood days (≥7)</span>
 							<span class="font-semibold {(insights.high_mood_avg_pnl ?? 0) >= 0 ? 'text-green-600' : 'text-destructive'}">
 								{insights.high_mood_avg_pnl != null ? formatCurrency(insights.high_mood_avg_pnl) : 'N/A'}
 							</span>
 						</div>
 						<div class="flex justify-between text-sm">
-							<span>Avg P&L on low mood days</span>
+							<span>Avg P&L on low mood days (&lt;7)</span>
 							<span class="font-semibold {(insights.low_mood_avg_pnl ?? 0) >= 0 ? 'text-green-600' : 'text-destructive'}">
 								{insights.low_mood_avg_pnl != null ? formatCurrency(insights.low_mood_avg_pnl) : 'N/A'}
 							</span>
 						</div>
-						<hr />
+					</CardContent>
+				</Card>
+
+				<Card>
+					<CardHeader><CardTitle>Sleep vs Performance</CardTitle></CardHeader>
+					<CardContent class="space-y-3">
 						<div class="flex justify-between text-sm">
-							<span>Avg P&L on good sleep days</span>
+							<span>Avg P&L on good sleep days (≥7)</span>
 							<span class="font-semibold {(insights.good_sleep_avg_pnl ?? 0) >= 0 ? 'text-green-600' : 'text-destructive'}">
 								{insights.good_sleep_avg_pnl != null ? formatCurrency(insights.good_sleep_avg_pnl) : 'N/A'}
 							</span>
 						</div>
 						<div class="flex justify-between text-sm">
-							<span>Avg P&L on poor sleep days</span>
+							<span>Avg P&L on poor sleep days (&lt;7)</span>
 							<span class="font-semibold {(insights.poor_sleep_avg_pnl ?? 0) >= 0 ? 'text-green-600' : 'text-destructive'}">
 								{insights.poor_sleep_avg_pnl != null ? formatCurrency(insights.poor_sleep_avg_pnl) : 'N/A'}
 							</span>
