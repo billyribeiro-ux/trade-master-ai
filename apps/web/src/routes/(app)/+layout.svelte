@@ -1,22 +1,45 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { page } from '$app/stores';
 	import { authApi } from '$lib/api';
 	import { onMount } from 'svelte';
 	import Toaster from '$lib/components/ui/toaster.svelte';
+	import type { Snippet } from 'svelte';
+
+	interface Props {
+		children: Snippet;
+	}
+
+	let { children }: Props = $props();
 
 	let user = $state<{ id: string; email: string } | null>(null);
 	let loading = $state(true);
+	let currentPath = $state('');
 
-	onMount(async () => {
-		try {
-			const currentUser = await authApi.getCurrentUser();
-			user = currentUser;
-		} catch {
-			goto('/login');
-		} finally {
-			loading = false;
-		}
+	onMount(() => {
+		// Track current path for active nav highlighting
+		currentPath = window.location.pathname;
+
+		// Listen for navigation changes
+		const handleNavigation = () => {
+			currentPath = window.location.pathname;
+		};
+		window.addEventListener('popstate', handleNavigation);
+
+		// Load user data
+		(async () => {
+			try {
+				const currentUser = await authApi.getCurrentUser();
+				user = currentUser;
+			} catch {
+				goto('/login');
+			} finally {
+				loading = false;
+			}
+		})();
+
+		return () => {
+			window.removeEventListener('popstate', handleNavigation);
+		};
 	});
 
 	async function handleLogout() {
@@ -42,6 +65,14 @@
 		<div class="text-muted-foreground">Loading...</div>
 	</div>
 {:else if user}
+	<!-- Skip Navigation Link for Accessibility -->
+	<a
+		href="#main-content"
+		class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+	>
+		Skip to main content
+	</a>
+
 	<div class="flex h-screen bg-background">
 		<!-- Sidebar -->
 		<aside class="hidden w-64 border-r bg-card lg:block">
@@ -49,11 +80,12 @@
 				<div class="flex h-16 items-center border-b px-6">
 					<h1 class="text-xl font-bold">TradeMaster AI</h1>
 				</div>
-				<nav class="flex-1 space-y-1 p-4">
+				<nav class="flex-1 space-y-1 p-4" aria-label="Main navigation">
 					{#each navItems as item}
 						<a
 							href={item.href}
-							class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground {$page.url.pathname.startsWith(item.href) ? 'bg-accent text-accent-foreground' : 'text-muted-foreground'}"
+							class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground {currentPath.startsWith(item.href) ? 'bg-accent text-accent-foreground' : 'text-muted-foreground'}"
+							aria-current={currentPath.startsWith(item.href) ? 'page' : undefined}
 						>
 							{item.label}
 						</a>
@@ -76,7 +108,7 @@
 		</aside>
 
 		<!-- Main content -->
-		<main class="flex-1 overflow-auto">
+		<main id="main-content" class="flex-1 overflow-auto">
 			{@render children()}
 		</main>
 	</div>

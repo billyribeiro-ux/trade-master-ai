@@ -58,14 +58,23 @@ async fn main() -> anyhow::Result<()> {
     let pool = Arc::new(pool);
 
     // Configure CORS
+    let cors_origins: Vec<_> = config
+        .cors_origins
+        .iter()
+        .filter_map(|origin| {
+            origin.parse().map_err(|e| {
+                tracing::warn!(origin = %origin, error = ?e, "Invalid CORS origin, skipping");
+                e
+            }).ok()
+        })
+        .collect();
+
+    if cors_origins.is_empty() {
+        tracing::warn!("No valid CORS origins configured");
+    }
+
     let cors = CorsLayer::new()
-        .allow_origin(
-            config
-                .cors_origins
-                .iter()
-                .map(|origin| origin.parse().unwrap())
-                .collect::<Vec<_>>(),
-        )
+        .allow_origin(cors_origins)
         .allow_methods(Any)
         .allow_headers(Any);
 
