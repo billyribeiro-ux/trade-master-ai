@@ -6,8 +6,8 @@ mod routes;
 mod services;
 
 use crate::config::Config;
-use crate::routes::{analytics, auth, csv, health, tags, trades};
-use crate::services::AuthService;
+use crate::routes::{ai_review, analytics, auth, csv, health, planning, tags, trades};
+use crate::services::{AiService, AuthService};
 use axum::{
     routing::{delete, get, post, put},
     Router,
@@ -52,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Create shared services
     let auth_service = Arc::new(AuthService::new(&config));
+    let ai_service = Arc::new(AiService::new(&config));
     let pool = Arc::new(pool);
 
     // Configure CORS
@@ -102,9 +103,26 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/analytics/setup-performance", get(analytics::get_setup_performance))
         .route("/api/v1/analytics/time-based", get(analytics::get_time_based_analytics))
         .route("/api/v1/analytics/drawdown", get(analytics::get_drawdown_analysis))
+        // Planning routes
+        .route("/api/v1/plans", post(planning::create_daily_plan))
+        .route("/api/v1/plans", get(planning::list_daily_plans))
+        .route("/api/v1/plans/by-date", get(planning::get_daily_plan_by_date))
+        .route("/api/v1/plans/:id", get(planning::get_daily_plan))
+        .route("/api/v1/plans/:id", put(planning::update_daily_plan))
+        .route("/api/v1/plans/:id", delete(planning::delete_daily_plan))
+        .route("/api/v1/plans/:id/watchlist", post(planning::add_watchlist_item))
+        .route("/api/v1/plans/:plan_id/watchlist/:item_id", put(planning::update_watchlist_item))
+        .route("/api/v1/plans/:plan_id/watchlist/:item_id", delete(planning::delete_watchlist_item))
+        // AI Review routes
+        .route("/api/v1/ai/reviews", post(ai_review::create_ai_review))
+        .route("/api/v1/ai/reviews", get(ai_review::list_ai_reviews))
+        .route("/api/v1/ai/reviews/:id", get(ai_review::get_ai_review))
+        .route("/api/v1/ai/reviews/:id", delete(ai_review::delete_ai_review))
+        .route("/api/v1/ai/reviews/:id/chat", post(ai_review::continue_chat))
         // Add state
         .with_state(pool.clone())
         .with_state(auth_service.clone())
+        .with_state(ai_service.clone())
         // Add middleware
         .layer(cors)
         .layer(tower_http::trace::TraceLayer::new_for_http());
