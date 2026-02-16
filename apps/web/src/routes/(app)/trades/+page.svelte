@@ -104,11 +104,18 @@
 			<h1 class="text-3xl font-bold">Trades</h1>
 			<p class="text-muted-foreground mt-1">{total} total trades</p>
 		</div>
-		<Button>
-			{#snippet children()}
-				<a href="/trades/new">Log New Trade</a>
-			{/snippet}
-		</Button>
+		<div class="flex gap-2">
+			<Button variant="outline">
+				{#snippet children()}
+					<a href="/trades/import">Import CSV</a>
+				{/snippet}
+			</Button>
+			<Button>
+				{#snippet children()}
+					<a href="/trades/new">Log New Trade</a>
+				{/snippet}
+			</Button>
+		</div>
 	</div>
 
 	<Card>

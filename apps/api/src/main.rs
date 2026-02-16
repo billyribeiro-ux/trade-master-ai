@@ -6,7 +6,7 @@ mod routes;
 mod services;
 
 use crate::config::Config;
-use crate::routes::{auth, health, tags, trades};
+use crate::routes::{analytics, auth, csv, health, tags, trades};
 use crate::services::AuthService;
 use axum::{
     routing::{delete, get, post, put},
@@ -93,6 +93,15 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/tags/:id", delete(tags::delete_tag))
         .route("/api/v1/trades/:trade_id/tags/:tag_id", post(tags::add_tag_to_trade))
         .route("/api/v1/trades/:trade_id/tags/:tag_id", delete(tags::remove_tag_from_trade))
+        // CSV import routes
+        .route("/api/v1/csv/import", post(csv::import_csv))
+        .route("/api/v1/csv/template", get(csv::get_csv_template))
+        // Analytics routes
+        .route("/api/v1/analytics/equity-curve", get(analytics::get_equity_curve))
+        .route("/api/v1/analytics/win-loss-distribution", get(analytics::get_win_loss_distribution))
+        .route("/api/v1/analytics/setup-performance", get(analytics::get_setup_performance))
+        .route("/api/v1/analytics/time-based", get(analytics::get_time_based_analytics))
+        .route("/api/v1/analytics/drawdown", get(analytics::get_drawdown_analysis))
         // Add state
         .with_state(pool.clone())
         .with_state(auth_service.clone())
