@@ -6,6 +6,7 @@
 	import Badge from '$lib/components/ui/badge.svelte';
 	import Select from '$lib/components/ui/select.svelte';
 	import Input from '$lib/components/ui/input.svelte';
+	import SeoHead from '$lib/components/layout/seo-head.svelte';
 	import { formatCurrency, formatPercent, formatDate } from '$lib/utils/format';
 	import { onMount } from 'svelte';
 	import type { Trade, TradeStatus } from '$lib/types/trade';
@@ -94,9 +95,11 @@
 	}
 </script>
 
-<svelte:head>
-	<title>Trades - TradeMaster AI</title>
-</svelte:head>
+<SeoHead
+	title="Trades"
+	description="View, filter, and manage all your trades. Track performance across stocks, options, futures, forex, and crypto. Sort by P&L, win rate, and more."
+	keywords={['trade log', 'trade journal', 'trading history', 'trade management', 'trade tracking']}
+/>
 
 <div class="p-6 space-y-6">
 	<div class="flex items-center justify-between">

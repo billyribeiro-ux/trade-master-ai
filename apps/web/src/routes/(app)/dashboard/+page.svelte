@@ -7,6 +7,7 @@
 	import Badge from '$lib/components/ui/badge.svelte';
 	import Spinner from '$lib/components/ui/spinner.svelte';
 	import EquityCurve from '$lib/components/analytics/equity-curve.svelte';
+	import SeoHead from '$lib/components/layout/seo-head.svelte';
 	import { formatCurrency } from '$lib/utils/format';
 	import { onMount } from 'svelte';
 	import type { TradeStats } from '$lib/types/trade';
@@ -74,9 +75,11 @@
 	];
 </script>
 
-<svelte:head>
-	<title>Dashboard - TradeMaster AI</title>
-</svelte:head>
+<SeoHead
+	title="Dashboard"
+	description="View your trading performance metrics, recent trades, and equity curve. Track your win rate, profit factor, and R-multiples in real-time."
+	keywords={['trading dashboard', 'trading metrics', 'equity curve', 'win rate', 'profit factor', 'trading journal']}
+/>
 
 <div class="p-6 space-y-6 max-w-7xl mx-auto">
 	<div class="flex items-center justify-between">

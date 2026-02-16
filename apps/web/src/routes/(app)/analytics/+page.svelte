@@ -10,35 +10,43 @@
 	import WinLossChart from '$lib/components/analytics/win-loss-chart.svelte';
 	import SetupPerformanceChart from '$lib/components/analytics/setup-performance-chart.svelte';
 	import TimeCharts from '$lib/components/analytics/time-charts.svelte';
+	import SeoHead from '$lib/components/layout/seo-head.svelte';
 	import { formatCurrency } from '$lib/utils/format';
 	import { onMount } from 'svelte';
+	import type {
+		EquityCurveData,
+		WinLossDistribution,
+		SetupPerformance,
+		TimeBasedAnalytics,
+		DrawdownData
+	} from '$lib/types/analytics';
 
 	let loading = $state(true);
-	let equityCurve = $state<any>(null);
-	let winLoss = $state<any>(null);
-	let setupPerf = $state<any[]>([]);
-	let timeBased = $state<any>(null);
-	let drawdown = $state<any>(null);
+	let equityCurve = $state<EquityCurveData | null>(null);
+	let winLoss = $state<WinLossDistribution | null>(null);
+	let setupPerf = $state<SetupPerformance[]>([]);
+	let timeBased = $state<TimeBasedAnalytics | null>(null);
+	let drawdown = $state<DrawdownData | null>(null);
 	let activeTab = $state<'overview' | 'setups' | 'time'>('overview');
 
 	onMount(async () => {
 		await loadAnalytics();
 	});
 
-	async function loadAnalytics() {
+	async function loadAnalytics(): Promise<void> {
 		loading = true;
 		try {
 			const [equity, distribution, setups, time, dd] = await Promise.all([
-				apiClient.get('/api/v1/analytics/equity-curve'),
-				apiClient.get('/api/v1/analytics/win-loss-distribution'),
-				apiClient.get('/api/v1/analytics/setup-performance'),
-				apiClient.get('/api/v1/analytics/time-based'),
-				apiClient.get('/api/v1/analytics/drawdown')
+				apiClient.get<EquityCurveData>('/api/v1/analytics/equity-curve'),
+				apiClient.get<WinLossDistribution>('/api/v1/analytics/win-loss-distribution'),
+				apiClient.get<SetupPerformance[]>('/api/v1/analytics/setup-performance'),
+				apiClient.get<TimeBasedAnalytics>('/api/v1/analytics/time-based'),
+				apiClient.get<DrawdownData>('/api/v1/analytics/drawdown')
 			]);
 
 			equityCurve = equity;
 			winLoss = distribution;
-			setupPerf = (setups ?? []) as any[];
+			setupPerf = setups ?? [];
 			timeBased = time;
 			drawdown = dd;
 		} catch (error) {
@@ -49,27 +57,29 @@
 	}
 
 	const totalPnl = $derived(
-		equityCurve?.points?.length > 0
+		equityCurve?.points && equityCurve.points.length > 0
 			? Number(equityCurve.points[equityCurve.points.length - 1]?.cumulative_pnl ?? 0)
 			: 0
 	);
 	const totalTrades = $derived(
-		(winLoss?.wins?.length ?? 0) + (winLoss?.losses?.length ?? 0)
+		(winLoss?.win_count ?? 0) + (winLoss?.loss_count ?? 0)
 	);
 	const winRate = $derived(
-		totalTrades > 0 ? ((winLoss?.wins?.length ?? 0) / totalTrades * 100) : 0
+		totalTrades > 0 ? ((winLoss?.win_count ?? 0) / totalTrades * 100) : 0
 	);
 	const profitFactor = $derived(
-		winLoss && Math.abs(Number(winLoss.avg_loss)) > 0
-			? Math.abs(Number(winLoss.avg_win) * (winLoss.wins?.length ?? 0)) /
-			  Math.abs(Number(winLoss.avg_loss) * (winLoss.losses?.length ?? 0))
+		winLoss && Math.abs(winLoss.avg_loss) > 0
+			? Math.abs(winLoss.avg_win * winLoss.win_count) /
+			  Math.abs(winLoss.avg_loss * winLoss.loss_count)
 			: 0
 	);
 </script>
 
-<svelte:head>
-	<title>Analytics - TradeMaster AI</title>
-</svelte:head>
+<SeoHead
+	title="Analytics"
+	description="Deep dive into your trading analytics. View equity curves, win/loss distributions, setup performance, time-based patterns, and drawdown analysis."
+	keywords={['trading analytics', 'equity curve', 'win loss ratio', 'setup performance', 'drawdown analysis', 'trading statistics']}
+/>
 
 <div class="p-6 max-w-7xl mx-auto space-y-6">
 	<div class="flex items-center justify-between">
@@ -129,7 +139,7 @@
 
 		{#if activeTab === 'overview'}
 			<!-- Equity Curve -->
-			{#if equityCurve?.points?.length > 0}
+			{#if equityCurve && equityCurve.points.length > 0}
 				<Card>
 					<CardHeader><CardTitle>Equity Curve & Drawdown</CardTitle></CardHeader>
 					<CardContent>
@@ -150,10 +160,10 @@
 					<CardHeader><CardTitle>Win/Loss Distribution</CardTitle></CardHeader>
 					<CardContent>
 						<WinLossChart
-							wins={winLoss.wins.map(Number)}
-							losses={winLoss.losses.map(Number)}
-							avg_win={Number(winLoss.avg_win)}
-							avg_loss={Number(winLoss.avg_loss)}
+							wins={winLoss.wins}
+							losses={winLoss.losses}
+							avg_win={winLoss.avg_win}
+							avg_loss={winLoss.avg_loss}
 						/>
 					</CardContent>
 				</Card>
@@ -168,19 +178,19 @@
 							<div class="space-y-1">
 								<p class="text-sm text-muted-foreground">Current Drawdown</p>
 								<p class="text-2xl font-bold text-red-500">
-									{formatCurrency(Number(drawdown.current_drawdown))}
+									{drawdown.current_drawdown_pct.toFixed(2)}%
 								</p>
 							</div>
 							<div class="space-y-1">
 								<p class="text-sm text-muted-foreground">Max Drawdown</p>
 								<p class="text-2xl font-bold text-red-500">
-									{formatCurrency(Number(drawdown.max_drawdown))}
+									{drawdown.max_drawdown_pct.toFixed(2)}%
 								</p>
 							</div>
 							<div class="space-y-1">
 								<p class="text-sm text-muted-foreground">Recovery Factor</p>
 								<p class="text-2xl font-bold">
-									{drawdown.recovery_factor ? Number(drawdown.recovery_factor).toFixed(2) : 'N/A'}
+									{drawdown.recovery_factor !== null ? drawdown.recovery_factor.toFixed(2) : 'N/A'}
 								</p>
 							</div>
 						</div>
