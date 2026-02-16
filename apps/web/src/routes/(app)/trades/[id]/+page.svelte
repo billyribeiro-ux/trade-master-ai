@@ -15,9 +15,8 @@
 	import Input from '$lib/components/ui/input.svelte';
 	import Label from '$lib/components/ui/label.svelte';
 	import Textarea from '$lib/components/ui/textarea.svelte';
-	// Select unused for now
 	import { toasts } from '$lib/stores/toast.svelte';
-	import { formatCurrency, formatPercent, formatDateTime, formatDuration } from '$lib/utils/format';
+	import { formatCurrency, formatPercent, formatDateTime } from '$lib/utils/format';
 	import { onMount } from 'svelte';
 	import type { TradeWithDetails } from '$lib/types/trade';
 

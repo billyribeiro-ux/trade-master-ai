@@ -1,6 +1,5 @@
 <script lang="ts">
 	import Chart from './chart.svelte';
-	import type { EChartsOption } from 'echarts';
 
 	interface HourlyPerf {
 		hour: number;
@@ -32,7 +31,7 @@
 
 	let { hourly, daily, monthly }: Props = $props();
 
-	function buildHourlyOptions(): EChartsOption {
+	function buildHourlyOptions() {
 		const hours = hourly.map(h => `${h.hour}:00`);
 		const pnl = hourly.map(h => Number(h.avg_pnl));
 		const counts = hourly.map(h => h.trade_count);
@@ -92,7 +91,7 @@
 		};
 	}
 
-	function buildDailyOptions(): EChartsOption {
+	function buildDailyOptions() {
 		const days = daily.map(d => d.day_name.trim());
 		const pnl = daily.map(d => Number(d.avg_pnl));
 		const winRates = daily.map(d => Number(d.win_rate));
@@ -154,7 +153,7 @@
 		};
 	}
 
-	function buildMonthlyOptions(): EChartsOption {
+	function buildMonthlyOptions() {
 		const months = monthly.map(m => m.month);
 		const pnl = monthly.map(m => Number(m.total_pnl));
 

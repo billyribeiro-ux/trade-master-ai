@@ -1,6 +1,5 @@
 <script lang="ts">
 	import Chart from './chart.svelte';
-	import type { EChartsOption } from 'echarts';
 
 	interface Props {
 		points: Array<{ date: string; cumulative_pnl: number; trade_count: number }>;
@@ -8,7 +7,7 @@
 
 	let { points }: Props = $props();
 
-	function buildOptions(): EChartsOption {
+	function buildOptions() {
 		const dates = points.map(p => new Date(p.date).toLocaleDateString());
 		const pnl = points.map(p => Number(p.cumulative_pnl));
 

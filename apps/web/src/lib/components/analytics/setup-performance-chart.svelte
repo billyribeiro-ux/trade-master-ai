@@ -1,6 +1,5 @@
 <script lang="ts">
 	import Chart from './chart.svelte';
-	import type { EChartsOption } from 'echarts';
 
 	interface SetupPerf {
 		setup_name: string;
@@ -17,7 +16,7 @@
 
 	let { setups }: Props = $props();
 
-	function buildOptions(): EChartsOption {
+	function buildOptions() {
 		const names = setups.map(s => s.setup_name);
 		const pnl = setups.map(s => Number(s.total_pnl));
 		const winRates = setups.map(s => Number(s.win_rate));

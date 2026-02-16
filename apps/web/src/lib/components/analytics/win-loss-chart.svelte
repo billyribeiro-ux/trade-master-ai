@@ -1,6 +1,5 @@
 <script lang="ts">
 	import Chart from './chart.svelte';
-	import type { EChartsOption } from 'echarts';
 
 	interface Props {
 		wins: number[];
@@ -11,7 +10,7 @@
 
 	let { wins, losses, avg_win, avg_loss }: Props = $props();
 
-	function buildOptions(): EChartsOption {
+	function buildOptions() {
 		const allValues = [...wins, ...losses.map(v => Math.abs(v))];
 		const maxVal = Math.max(...allValues, 1);
 		const bucketSize = Math.ceil(maxVal / 15);

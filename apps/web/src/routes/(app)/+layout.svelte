@@ -44,7 +44,7 @@
 
 	async function handleLogout() {
 		await authApi.logout();
-		goto('/login');
+		await goto('/login');
 	}
 
 	const navItems = [
