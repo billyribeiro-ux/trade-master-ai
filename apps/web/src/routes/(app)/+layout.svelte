@@ -29,9 +29,11 @@
 		{ href: '/trades', label: 'Trades', icon: 'TrendingUp' },
 		{ href: '/analytics', label: 'Analytics', icon: 'BarChart3' },
 		{ href: '/planning', label: 'Planning', icon: 'Calendar' },
+		{ href: '/ai-review', label: 'AI Coach', icon: 'Bot' },
+		{ href: '/risk', label: 'Risk Tools', icon: 'Shield' },
 		{ href: '/psychology', label: 'Psychology', icon: 'Brain' },
 		{ href: '/playbook', label: 'Playbook', icon: 'BookOpen' },
-		{ href: '/settings', label: 'Settings', icon: 'Settings' }
+		{ href: '/reviews', label: 'Reviews', icon: 'ClipboardCheck' },
 	];
 </script>
 

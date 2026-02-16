@@ -4,76 +4,59 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
-/// A playbook entry defines a specific trading setup with rules, criteria,
-/// and grading rubrics. Traders build a library of setups they trade.
+/// Matches `playbook_setups` table from migration 010.
 #[derive(Debug, Clone, FromRow, Serialize)]
-pub struct PlaybookEntry {
+pub struct PlaybookSetup {
     pub id: Uuid,
     pub user_id: Uuid,
     pub name: String,
     pub description: Option<String>,
-    pub asset_classes: Option<Vec<String>>,
-    pub timeframes: Option<Vec<String>>,
-
-    /// Entry criteria checklist items
-    pub entry_criteria: Option<Vec<String>>,
-    /// Exit criteria checklist items
-    pub exit_criteria: Option<Vec<String>>,
-    /// Risk management rules specific to this setup
-    pub risk_rules: Option<Vec<String>>,
-
-    /// Example trade IDs for reference
-    pub example_trade_ids: Option<Vec<Uuid>>,
-
-    /// Minimum conviction level to take this setup
-    pub min_conviction: Option<String>,
-    /// Maximum risk percent for this setup
-    pub max_risk_percent: Option<Decimal>,
-    /// Ideal market conditions
-    pub ideal_market_conditions: Option<Vec<String>>,
-    /// Conditions to avoid
-    pub avoid_conditions: Option<Vec<String>>,
-
-    /// Whether this setup is currently active in the playbook
+    pub criteria: Option<serde_json::Value>,
+    pub expected_r_min: Option<Decimal>,
+    pub expected_r_max: Option<Decimal>,
+    pub min_conviction: Option<i32>,
+    pub preferred_timeframe: Option<String>,
+    pub market_regimes: Option<Vec<String>>,
+    pub example_screenshots: Option<Vec<String>>,
+    pub common_mistakes: Option<String>,
+    pub trade_count: i32,
+    pub win_rate: Option<Decimal>,
+    pub avg_r: Option<Decimal>,
+    pub profit_factor: Option<Decimal>,
+    pub total_pnl: Option<Decimal>,
     pub is_active: bool,
-
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CreatePlaybookEntryRequest {
+pub struct CreatePlaybookSetupRequest {
     pub name: String,
     pub description: Option<String>,
-    pub asset_classes: Option<Vec<String>>,
-    pub timeframes: Option<Vec<String>>,
-    pub entry_criteria: Option<Vec<String>>,
-    pub exit_criteria: Option<Vec<String>>,
-    pub risk_rules: Option<Vec<String>>,
-    pub min_conviction: Option<String>,
-    pub max_risk_percent: Option<Decimal>,
-    pub ideal_market_conditions: Option<Vec<String>>,
-    pub avoid_conditions: Option<Vec<String>>,
+    pub criteria: Option<serde_json::Value>,
+    pub expected_r_min: Option<Decimal>,
+    pub expected_r_max: Option<Decimal>,
+    pub min_conviction: Option<i32>,
+    pub preferred_timeframe: Option<String>,
+    pub market_regimes: Option<Vec<String>>,
+    pub common_mistakes: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct UpdatePlaybookEntryRequest {
+pub struct UpdatePlaybookSetupRequest {
     pub name: Option<String>,
     pub description: Option<String>,
-    pub asset_classes: Option<Vec<String>>,
-    pub timeframes: Option<Vec<String>>,
-    pub entry_criteria: Option<Vec<String>>,
-    pub exit_criteria: Option<Vec<String>>,
-    pub risk_rules: Option<Vec<String>>,
-    pub min_conviction: Option<String>,
-    pub max_risk_percent: Option<Decimal>,
-    pub ideal_market_conditions: Option<Vec<String>>,
-    pub avoid_conditions: Option<Vec<String>>,
+    pub criteria: Option<serde_json::Value>,
+    pub expected_r_min: Option<Decimal>,
+    pub expected_r_max: Option<Decimal>,
+    pub min_conviction: Option<i32>,
+    pub preferred_timeframe: Option<String>,
+    pub market_regimes: Option<Vec<String>>,
+    pub common_mistakes: Option<String>,
     pub is_active: Option<bool>,
 }
 
-/// Performance statistics for a specific playbook entry, computed from
-/// closed trades that reference this setup name.
+/// Live performance statistics for a playbook setup, computed from trades.
 #[derive(Debug, Serialize, FromRow)]
 pub struct PlaybookPerformance {
     pub setup_name: String,
@@ -89,13 +72,10 @@ pub struct PlaybookPerformance {
     pub avg_hold_minutes: Option<i32>,
 }
 
-const MAX_NAME_LENGTH: usize = 200;
+const MAX_NAME_LENGTH: usize = 255;
 const MAX_DESCRIPTION_LENGTH: usize = 10_000;
-const MAX_CRITERIA_ITEMS: usize = 30;
-const MAX_CRITERIA_ITEM_LENGTH: usize = 500;
 
-/// Validates a playbook entry creation request.
-pub fn validate_playbook_entry(req: &CreatePlaybookEntryRequest) -> Result<(), String> {
+pub fn validate_playbook_setup(req: &CreatePlaybookSetupRequest) -> Result<(), String> {
     let name = req.name.trim();
     if name.is_empty() || name.len() > MAX_NAME_LENGTH {
         return Err(format!(
@@ -113,40 +93,29 @@ pub fn validate_playbook_entry(req: &CreatePlaybookEntryRequest) -> Result<(), S
         }
     }
 
-    validate_string_list(&req.entry_criteria, "entry_criteria")?;
-    validate_string_list(&req.exit_criteria, "exit_criteria")?;
-    validate_string_list(&req.risk_rules, "risk_rules")?;
-    validate_string_list(&req.ideal_market_conditions, "ideal_market_conditions")?;
-    validate_string_list(&req.avoid_conditions, "avoid_conditions")?;
-
-    if let Some(ref max_risk) = req.max_risk_percent {
-        if *max_risk <= Decimal::ZERO || *max_risk > Decimal::from(100) {
-            return Err("max_risk_percent must be between 0 and 100".to_string());
+    if let Some(conviction) = req.min_conviction {
+        if !(1..=5).contains(&conviction) {
+            return Err("min_conviction must be between 1 and 5".to_string());
         }
     }
 
-    Ok(())
-}
-
-fn validate_string_list(
-    list: &Option<Vec<String>>,
-    field_name: &str,
-) -> Result<(), String> {
-    if let Some(items) = list {
-        if items.len() > MAX_CRITERIA_ITEMS {
-            return Err(format!(
-                "{} can have at most {} items",
-                field_name, MAX_CRITERIA_ITEMS
-            ));
-        }
-        for item in items {
-            if item.trim().is_empty() || item.len() > MAX_CRITERIA_ITEM_LENGTH {
-                return Err(format!(
-                    "Each {} item must be between 1 and {} characters",
-                    field_name, MAX_CRITERIA_ITEM_LENGTH
-                ));
-            }
+    if let Some(r_min) = req.expected_r_min {
+        if r_min < Decimal::ZERO {
+            return Err("expected_r_min must be non-negative".to_string());
         }
     }
+
+    if let Some(r_max) = req.expected_r_max {
+        if r_max < Decimal::ZERO {
+            return Err("expected_r_max must be non-negative".to_string());
+        }
+    }
+
+    if let (Some(r_min), Some(r_max)) = (req.expected_r_min, req.expected_r_max) {
+        if r_min > r_max {
+            return Err("expected_r_min must be <= expected_r_max".to_string());
+        }
+    }
+
     Ok(())
 }

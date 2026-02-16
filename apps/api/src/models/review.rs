@@ -1,46 +1,36 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use uuid::Uuid;
 
-/// A periodic review (weekly or monthly) where the trader reflects on
-/// their performance, identifies patterns, and sets goals.
+/// Matches `periodic_reviews` table from migration 013.
 #[derive(Debug, Clone, FromRow, Serialize)]
 pub struct PeriodicReview {
     pub id: Uuid,
     pub user_id: Uuid,
     pub review_type: String,
-    pub period_start: DateTime<Utc>,
-    pub period_end: DateTime<Utc>,
-
-    /// Performance summary (auto-populated from trades)
+    pub period_start: NaiveDate,
+    pub period_end: NaiveDate,
     pub total_trades: Option<i32>,
     pub winning_trades: Option<i32>,
     pub losing_trades: Option<i32>,
     pub win_rate: Option<Decimal>,
     pub total_pnl: Option<Decimal>,
     pub avg_r_multiple: Option<Decimal>,
-
-    /// Self-assessment
     pub what_went_well: Option<String>,
     pub what_to_improve: Option<String>,
     pub key_lessons: Option<Vec<String>>,
     pub rules_broken: Option<Vec<String>>,
     pub best_trade_id: Option<Uuid>,
     pub worst_trade_id: Option<Uuid>,
-
-    /// Goals
     pub goals_met: Option<Vec<String>>,
     pub goals_missed: Option<Vec<String>>,
     pub goals_next_period: Option<Vec<String>>,
-
-    /// Ratings (1-10)
     pub discipline_rating: Option<i32>,
     pub patience_rating: Option<i32>,
     pub execution_rating: Option<i32>,
     pub overall_rating: Option<i32>,
-
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -48,8 +38,8 @@ pub struct PeriodicReview {
 #[derive(Debug, Deserialize)]
 pub struct CreateReviewRequest {
     pub review_type: String,
-    pub period_start: DateTime<Utc>,
-    pub period_end: DateTime<Utc>,
+    pub period_start: NaiveDate,
+    pub period_end: NaiveDate,
     pub what_went_well: Option<String>,
     pub what_to_improve: Option<String>,
     pub key_lessons: Option<Vec<String>>,
@@ -82,7 +72,6 @@ pub struct UpdateReviewRequest {
     pub overall_rating: Option<i32>,
 }
 
-/// A review enriched with auto-computed trade statistics for the period.
 #[derive(Debug, Serialize)]
 pub struct ReviewWithStats {
     #[serde(flatten)]
@@ -101,7 +90,7 @@ pub struct SetupSummary {
 
 #[derive(Debug, Serialize, FromRow)]
 pub struct DailyPnl {
-    pub trade_date: DateTime<Utc>,
+    pub trade_date: NaiveDate,
     pub pnl: Decimal,
     pub trade_count: i64,
 }
@@ -109,7 +98,6 @@ pub struct DailyPnl {
 const MAX_TEXT_LENGTH: usize = 20_000;
 const MAX_LIST_ITEMS: usize = 30;
 
-/// Validates review type is one of the allowed values.
 pub fn validate_review_type(review_type: &str) -> Result<&'static str, String> {
     match review_type {
         "weekly" => Ok("weekly"),
@@ -122,7 +110,6 @@ pub fn validate_review_type(review_type: &str) -> Result<&'static str, String> {
     }
 }
 
-/// Validates a rating is in the 1-10 range.
 pub fn validate_rating(value: i32, field_name: &str) -> Result<(), String> {
     if !(1..=10).contains(&value) {
         return Err(format!("{} must be between 1 and 10", field_name));
@@ -130,7 +117,6 @@ pub fn validate_rating(value: i32, field_name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Validates a create review request.
 pub fn validate_review_request(req: &CreateReviewRequest) -> Result<(), String> {
     validate_review_type(&req.review_type)?;
 
@@ -140,18 +126,12 @@ pub fn validate_review_request(req: &CreateReviewRequest) -> Result<(), String> 
 
     if let Some(ref text) = req.what_went_well {
         if text.len() > MAX_TEXT_LENGTH {
-            return Err(format!(
-                "what_went_well must be {} characters or fewer",
-                MAX_TEXT_LENGTH
-            ));
+            return Err(format!("what_went_well must be {} characters or fewer", MAX_TEXT_LENGTH));
         }
     }
     if let Some(ref text) = req.what_to_improve {
         if text.len() > MAX_TEXT_LENGTH {
-            return Err(format!(
-                "what_to_improve must be {} characters or fewer",
-                MAX_TEXT_LENGTH
-            ));
+            return Err(format!("what_to_improve must be {} characters or fewer", MAX_TEXT_LENGTH));
         }
     }
 

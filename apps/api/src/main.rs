@@ -6,7 +6,7 @@ mod routes;
 mod services;
 
 use crate::config::Config;
-use crate::routes::{ai_review, analytics, auth, csv, health, planning, playbook, psychology, risk, tags, trades};
+use crate::routes::{ai_review, analytics, auth, csv, health, planning, playbook, psychology, review, risk, tags, trades};
 use crate::services::{AiService, AuthService};
 use axum::{
     routing::{delete, get, post, put},
@@ -138,6 +138,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/playbook/:id", get(playbook::get_playbook_entry))
         .route("/api/v1/playbook/:id", put(playbook::update_playbook_entry))
         .route("/api/v1/playbook/:id", delete(playbook::delete_playbook_entry))
+        // Review routes
+        .route("/api/v1/reviews", post(review::create_review))
+        .route("/api/v1/reviews", get(review::list_reviews))
+        .route("/api/v1/reviews/:id", get(review::get_review))
+        .route("/api/v1/reviews/:id", put(review::update_review))
+        .route("/api/v1/reviews/:id", delete(review::delete_review))
         // Add state
         .with_state(pool.clone())
         .with_state(auth_service.clone())

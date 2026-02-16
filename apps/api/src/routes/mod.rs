@@ -9,6 +9,7 @@ pub mod ai_review;
 pub mod risk;
 pub mod psychology;
 pub mod playbook;
+pub mod review;
 
 pub use auth::*;
 pub use health::*;
@@ -21,3 +22,4 @@ pub use ai_review::*;
 pub use risk::*;
 pub use psychology::*;
 pub use playbook::*;
+pub use review::*;

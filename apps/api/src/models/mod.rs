@@ -6,6 +6,7 @@ pub mod planning;
 pub mod ai_review;
 pub mod psychology;
 pub mod playbook;
+pub mod review;
 
 pub use user::*;
 pub use auth::*;
@@ -15,3 +16,4 @@ pub use planning::*;
 pub use ai_review::*;
 pub use psychology::*;
 pub use playbook::*;
+pub use review::*;

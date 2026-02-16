@@ -7,7 +7,7 @@ use axum::{
     extract::{Path, Query, State},
     Json,
 };
-use chrono::{DateTime, Utc};
+use chrono::NaiveDate;
 use serde::Deserialize;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -23,37 +23,48 @@ pub async fn create_daily_plan(
     auth_user: AuthUser,
     Json(req): Json<CreateDailyPlanRequest>,
 ) -> AppResult<Json<DailyPlan>> {
+    // Validate market_bias if provided
+    if let Some(ref bias) = req.market_bias {
+        match bias.as_str() {
+            "bullish" | "bearish" | "neutral" => {}
+            _ => {
+                return Err(AppError::Validation(
+                    "market_bias must be 'bullish', 'bearish', or 'neutral'".to_string(),
+                ));
+            }
+        }
+    }
+
     let plan = sqlx::query_as::<_, DailyPlan>(
         r#"
         INSERT INTO daily_plans (
-            user_id, plan_date, market_bias, key_levels, trade_plan,
-            max_trades, max_loss, focus_setups, avoid_setups,
-            pre_market_notes, goals_for_day, emotional_state
+            user_id, plan_date, market_bias, bias_reasoning,
+            session_goals, max_trades, max_daily_loss,
+            checklist_items, notes
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING *
         "#,
     )
     .bind(auth_user.user_id)
     .bind(req.plan_date)
     .bind(&req.market_bias)
-    .bind(&req.key_levels)
-    .bind(&req.trade_plan)
+    .bind(&req.bias_reasoning)
+    .bind(&req.session_goals)
     .bind(req.max_trades)
-    .bind(req.max_loss)
-    .bind(&req.focus_setups)
-    .bind(&req.avoid_setups)
-    .bind(&req.pre_market_notes)
-    .bind(&req.goals_for_day)
-    .bind(&req.emotional_state)
+    .bind(req.max_daily_loss)
+    .bind(&req.checklist_items)
+    .bind(&req.notes)
     .fetch_one(pool.as_ref())
     .await
     .map_err(|e| match e {
-        sqlx::Error::Database(db_err) if db_err.is_unique_violation() => {
-            AppError::Conflict("Plan for this date already exists".to_string())
+        sqlx::Error::Database(ref db_err) if db_err.is_unique_violation() => {
+            AppError::Conflict("A plan for this date already exists".to_string())
         }
         _ => AppError::from(e),
     })?;
+
+    tracing::info!(plan_id = %plan.id, date = %plan.plan_date, "Daily plan created");
 
     Ok(Json(plan))
 }
@@ -64,10 +75,7 @@ pub async fn get_daily_plan(
     Path(plan_id): Path<Uuid>,
 ) -> AppResult<Json<DailyPlanWithWatchlist>> {
     let plan = sqlx::query_as::<_, DailyPlan>(
-        r#"
-        SELECT * FROM daily_plans
-        WHERE id = $1 AND user_id = $2
-        "#,
+        "SELECT * FROM daily_plans WHERE id = $1 AND user_id = $2",
     )
     .bind(plan_id)
     .bind(auth_user.user_id)
@@ -76,11 +84,7 @@ pub async fn get_daily_plan(
     .ok_or_else(|| AppError::NotFound("Daily plan not found".to_string()))?;
 
     let watchlist = sqlx::query_as::<_, WatchlistItem>(
-        r#"
-        SELECT * FROM watchlist_items
-        WHERE daily_plan_id = $1
-        ORDER BY created_at
-        "#,
+        "SELECT * FROM watchlist_items WHERE plan_id = $1 ORDER BY sort_order, created_at",
     )
     .bind(plan_id)
     .fetch_all(pool.as_ref())
@@ -94,19 +98,15 @@ pub async fn get_daily_plan_by_date(
     auth_user: AuthUser,
     Query(query): Query<DateQuery>,
 ) -> AppResult<Json<Option<DailyPlanWithWatchlist>>> {
-    let date = if let Some(date_str) = query.date {
-        DateTime::parse_from_rfc3339(&date_str)
-            .map_err(|_| AppError::Validation("Invalid date format".to_string()))?
-            .with_timezone(&Utc)
+    let date = if let Some(ref date_str) = query.date {
+        NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+            .map_err(|_| AppError::Validation("Invalid date format. Use YYYY-MM-DD.".to_string()))?
     } else {
-        Utc::now()
+        chrono::Utc::now().date_naive()
     };
 
     let plan = sqlx::query_as::<_, DailyPlan>(
-        r#"
-        SELECT * FROM daily_plans
-        WHERE user_id = $1 AND DATE(plan_date) = DATE($2)
-        "#,
+        "SELECT * FROM daily_plans WHERE user_id = $1 AND plan_date = $2",
     )
     .bind(auth_user.user_id)
     .bind(date)
@@ -115,11 +115,7 @@ pub async fn get_daily_plan_by_date(
 
     if let Some(plan) = plan {
         let watchlist = sqlx::query_as::<_, WatchlistItem>(
-            r#"
-            SELECT * FROM watchlist_items
-            WHERE daily_plan_id = $1
-            ORDER BY created_at
-            "#,
+            "SELECT * FROM watchlist_items WHERE plan_id = $1 ORDER BY sort_order, created_at",
         )
         .bind(plan.id)
         .fetch_all(pool.as_ref())
@@ -136,12 +132,7 @@ pub async fn list_daily_plans(
     auth_user: AuthUser,
 ) -> AppResult<Json<Vec<DailyPlan>>> {
     let plans = sqlx::query_as::<_, DailyPlan>(
-        r#"
-        SELECT * FROM daily_plans
-        WHERE user_id = $1
-        ORDER BY plan_date DESC
-        LIMIT 30
-        "#,
+        "SELECT * FROM daily_plans WHERE user_id = $1 ORDER BY plan_date DESC LIMIT 30",
     )
     .bind(auth_user.user_id)
     .fetch_all(pool.as_ref())
@@ -156,10 +147,21 @@ pub async fn update_daily_plan(
     Path(plan_id): Path<Uuid>,
     Json(req): Json<UpdateDailyPlanRequest>,
 ) -> AppResult<Json<DailyPlan>> {
+    // Validate market_bias if provided
+    if let Some(ref bias) = req.market_bias {
+        match bias.as_str() {
+            "bullish" | "bearish" | "neutral" => {}
+            _ => {
+                return Err(AppError::Validation(
+                    "market_bias must be 'bullish', 'bearish', or 'neutral'".to_string(),
+                ));
+            }
+        }
+    }
+
+    // Verify ownership
     sqlx::query_scalar::<_, bool>(
-        r#"
-        SELECT EXISTS(SELECT 1 FROM daily_plans WHERE id = $1 AND user_id = $2)
-        "#,
+        "SELECT EXISTS(SELECT 1 FROM daily_plans WHERE id = $1 AND user_id = $2)",
     )
     .bind(plan_id)
     .bind(auth_user.user_id)
@@ -172,34 +174,27 @@ pub async fn update_daily_plan(
         r#"
         UPDATE daily_plans SET
             market_bias = COALESCE($1, market_bias),
-            key_levels = COALESCE($2, key_levels),
-            trade_plan = COALESCE($3, trade_plan),
+            bias_reasoning = COALESCE($2, bias_reasoning),
+            session_goals = COALESCE($3, session_goals),
             max_trades = COALESCE($4, max_trades),
-            max_loss = COALESCE($5, max_loss),
-            focus_setups = COALESCE($6, focus_setups),
-            avoid_setups = COALESCE($7, avoid_setups),
-            pre_market_notes = COALESCE($8, pre_market_notes),
-            post_market_notes = COALESCE($9, post_market_notes),
-            goals_for_day = COALESCE($10, goals_for_day),
-            emotional_state = COALESCE($11, emotional_state),
-            plan_followed = COALESCE($12, plan_followed),
+            max_daily_loss = COALESCE($5, max_daily_loss),
+            checklist_items = COALESCE($6, checklist_items),
+            notes = COALESCE($7, notes),
+            completed = COALESCE($8, completed),
+            completed_at = CASE WHEN $8 = TRUE THEN NOW() ELSE completed_at END,
             updated_at = NOW()
-        WHERE id = $13
+        WHERE id = $9
         RETURNING *
         "#,
     )
     .bind(&req.market_bias)
-    .bind(&req.key_levels)
-    .bind(&req.trade_plan)
+    .bind(&req.bias_reasoning)
+    .bind(&req.session_goals)
     .bind(req.max_trades)
-    .bind(req.max_loss)
-    .bind(&req.focus_setups)
-    .bind(&req.avoid_setups)
-    .bind(&req.pre_market_notes)
-    .bind(&req.post_market_notes)
-    .bind(&req.goals_for_day)
-    .bind(&req.emotional_state)
-    .bind(req.plan_followed)
+    .bind(req.max_daily_loss)
+    .bind(&req.checklist_items)
+    .bind(&req.notes)
+    .bind(req.completed)
     .bind(plan_id)
     .fetch_one(pool.as_ref())
     .await?;
@@ -212,21 +207,17 @@ pub async fn delete_daily_plan(
     auth_user: AuthUser,
     Path(plan_id): Path<Uuid>,
 ) -> AppResult<Json<serde_json::Value>> {
-    let result = sqlx::query(
-        r#"
-        DELETE FROM daily_plans WHERE id = $1 AND user_id = $2
-        "#,
-    )
-    .bind(plan_id)
-    .bind(auth_user.user_id)
-    .execute(pool.as_ref())
-    .await?;
+    let result = sqlx::query("DELETE FROM daily_plans WHERE id = $1 AND user_id = $2")
+        .bind(plan_id)
+        .bind(auth_user.user_id)
+        .execute(pool.as_ref())
+        .await?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound("Daily plan not found".to_string()));
     }
 
-    Ok(Json(serde_json::json!({ "message": "Plan deleted successfully" })))
+    Ok(Json(serde_json::json!({ "message": "Plan deleted" })))
 }
 
 pub async fn add_watchlist_item(
@@ -235,10 +226,16 @@ pub async fn add_watchlist_item(
     Path(plan_id): Path<Uuid>,
     Json(req): Json<CreateWatchlistItemRequest>,
 ) -> AppResult<Json<WatchlistItem>> {
+    let symbol = req.symbol.trim().to_uppercase();
+    if symbol.is_empty() || symbol.len() > 20 {
+        return Err(AppError::Validation(
+            "Symbol must be between 1 and 20 characters".to_string(),
+        ));
+    }
+
+    // Verify plan ownership
     sqlx::query_scalar::<_, bool>(
-        r#"
-        SELECT EXISTS(SELECT 1 FROM daily_plans WHERE id = $1 AND user_id = $2)
-        "#,
+        "SELECT EXISTS(SELECT 1 FROM daily_plans WHERE id = $1 AND user_id = $2)",
     )
     .bind(plan_id)
     .bind(auth_user.user_id)
@@ -247,23 +244,35 @@ pub async fn add_watchlist_item(
     .then_some(())
     .ok_or_else(|| AppError::NotFound("Daily plan not found".to_string()))?;
 
+    // Get next sort_order
+    let next_order = sqlx::query_scalar::<_, Option<i32>>(
+        "SELECT MAX(sort_order) FROM watchlist_items WHERE plan_id = $1",
+    )
+    .bind(plan_id)
+    .fetch_one(pool.as_ref())
+    .await?
+    .map(|n| n + 1)
+    .unwrap_or(0);
+
     let item = sqlx::query_as::<_, WatchlistItem>(
         r#"
         INSERT INTO watchlist_items (
-            daily_plan_id, symbol, entry_price, stop_loss,
-            target_price, setup_type, notes
+            plan_id, symbol, key_levels, catalysts,
+            setup_description, risk_reward_ratio,
+            position_size_suggested, sort_order
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING *
         "#,
     )
     .bind(plan_id)
-    .bind(&req.symbol.to_uppercase())
-    .bind(req.entry_price)
-    .bind(req.stop_loss)
-    .bind(req.target_price)
-    .bind(&req.setup_type)
-    .bind(&req.notes)
+    .bind(&symbol)
+    .bind(&req.key_levels)
+    .bind(&req.catalysts)
+    .bind(&req.setup_description)
+    .bind(req.risk_reward_ratio)
+    .bind(req.position_size_suggested)
+    .bind(next_order)
     .fetch_one(pool.as_ref())
     .await?;
 
@@ -276,12 +285,13 @@ pub async fn update_watchlist_item(
     Path((plan_id, item_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<UpdateWatchlistItemRequest>,
 ) -> AppResult<Json<WatchlistItem>> {
+    // Verify ownership through plan
     sqlx::query_scalar::<_, bool>(
         r#"
         SELECT EXISTS(
             SELECT 1 FROM watchlist_items wi
-            JOIN daily_plans dp ON wi.daily_plan_id = dp.id
-            WHERE wi.id = $1 AND wi.daily_plan_id = $2 AND dp.user_id = $3
+            JOIN daily_plans dp ON wi.plan_id = dp.id
+            WHERE wi.id = $1 AND wi.plan_id = $2 AND dp.user_id = $3
         )
         "#,
     )
@@ -293,28 +303,42 @@ pub async fn update_watchlist_item(
     .then_some(())
     .ok_or_else(|| AppError::NotFound("Watchlist item not found".to_string()))?;
 
+    // Validate outcome if provided
+    if let Some(ref outcome) = req.outcome {
+        match outcome.as_str() {
+            "winner" | "loser" | "missed" | "no_setup" => {}
+            _ => {
+                return Err(AppError::Validation(
+                    "outcome must be 'winner', 'loser', 'missed', or 'no_setup'".to_string(),
+                ));
+            }
+        }
+    }
+
     let item = sqlx::query_as::<_, WatchlistItem>(
         r#"
         UPDATE watchlist_items SET
             symbol = COALESCE($1, symbol),
-            entry_price = COALESCE($2, entry_price),
-            stop_loss = COALESCE($3, stop_loss),
-            target_price = COALESCE($4, target_price),
-            setup_type = COALESCE($5, setup_type),
-            notes = COALESCE($6, notes),
-            triggered = COALESCE($7, triggered),
+            key_levels = COALESCE($2, key_levels),
+            catalysts = COALESCE($3, catalysts),
+            setup_description = COALESCE($4, setup_description),
+            risk_reward_ratio = COALESCE($5, risk_reward_ratio),
+            position_size_suggested = COALESCE($6, position_size_suggested),
+            was_traded = COALESCE($7, was_traded),
+            outcome = COALESCE($8, outcome),
             updated_at = NOW()
-        WHERE id = $8
+        WHERE id = $9
         RETURNING *
         "#,
     )
     .bind(&req.symbol)
-    .bind(req.entry_price)
-    .bind(req.stop_loss)
-    .bind(req.target_price)
-    .bind(&req.setup_type)
-    .bind(&req.notes)
-    .bind(req.triggered)
+    .bind(&req.key_levels)
+    .bind(&req.catalysts)
+    .bind(&req.setup_description)
+    .bind(req.risk_reward_ratio)
+    .bind(req.position_size_suggested)
+    .bind(req.was_traded)
+    .bind(&req.outcome)
     .bind(item_id)
     .fetch_one(pool.as_ref())
     .await?;
@@ -330,8 +354,8 @@ pub async fn delete_watchlist_item(
     let result = sqlx::query(
         r#"
         DELETE FROM watchlist_items
-        WHERE id = $1 AND daily_plan_id = $2
-        AND daily_plan_id IN (SELECT id FROM daily_plans WHERE user_id = $3)
+        WHERE id = $1 AND plan_id = $2
+        AND plan_id IN (SELECT id FROM daily_plans WHERE user_id = $3)
         "#,
     )
     .bind(item_id)
