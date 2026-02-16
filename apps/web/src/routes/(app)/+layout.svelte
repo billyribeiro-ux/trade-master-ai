@@ -77,7 +77,7 @@
 
 		<!-- Main content -->
 		<main class="flex-1 overflow-auto">
-			<slot />
+			{@render children()}
 		</main>
 	</div>
 	<Toaster />
