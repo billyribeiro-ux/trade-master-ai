@@ -8,9 +8,10 @@
 	import CardTitle from '$lib/components/ui/card-title.svelte';
 	import CardContent from '$lib/components/ui/card-content.svelte';
 	import { formatCurrency } from '$lib/utils/format';
+	import { toasts } from '$lib/stores/toast.svelte';
 
 	// Position Size Calculator
-	let posForm = $state({ account_size: '', risk_percent: '', entry_price: '', stop_loss: '' });
+	let posForm = $state({ account_size: '', risk_percent: '1', entry_price: '', stop_loss: '' });
 	let posResult = $state<{ position_size: number; risk_amount: number; position_value: number } | null>(null);
 
 	// Risk/Reward Calculator
@@ -29,7 +30,9 @@
 				entry_price: parseFloat(posForm.entry_price),
 				stop_loss: parseFloat(posForm.stop_loss),
 			});
-		} catch { /* validation handled by API */ }
+		} catch {
+			toasts.error('Please fill in all fields with valid numbers');
+		}
 	}
 
 	async function calculateRiskReward() {
@@ -39,7 +42,9 @@
 				stop_loss: parseFloat(rrForm.stop_loss),
 				target_price: parseFloat(rrForm.target_price),
 			});
-		} catch { /* validation handled by API */ }
+		} catch {
+			toasts.error('Please fill in all fields with valid numbers');
+		}
 	}
 
 	async function calculateKelly() {
@@ -49,8 +54,34 @@
 				avg_win: parseFloat(kellyForm.avg_win),
 				avg_loss: parseFloat(kellyForm.avg_loss),
 			});
-		} catch { /* validation handled by API */ }
+		} catch {
+			toasts.error('Please fill in all fields with valid numbers');
+		}
 	}
+
+	const rrBarWidth = $derived(
+		rrResult?.risk_reward_ratio
+			? Math.min(rrResult.risk_reward_ratio / (1 + rrResult.risk_reward_ratio) * 100, 90)
+			: 50
+	);
+
+	const rrColor = $derived(
+		rrResult?.risk_reward_ratio
+			? rrResult.risk_reward_ratio >= 3 ? 'text-green-400' : rrResult.risk_reward_ratio >= 2 ? 'text-green-500' : rrResult.risk_reward_ratio >= 1 ? 'text-yellow-500' : 'text-red-500'
+			: ''
+	);
+
+	const kellyColor = $derived(
+		kellyResult
+			? kellyResult.half_kelly >= 5 ? 'text-green-400' : kellyResult.half_kelly >= 2 ? 'text-yellow-500' : kellyResult.half_kelly > 0 ? 'text-orange-500' : 'text-red-500'
+			: ''
+	);
+
+	const posAccountPercent = $derived(
+		posResult && posForm.account_size
+			? (posResult.position_value / parseFloat(posForm.account_size) * 100)
+			: 0
+	);
 </script>
 
 <svelte:head>
@@ -91,18 +122,33 @@
 				</Button>
 
 				{#if posResult}
-					<div class="mt-4 p-3 bg-muted rounded-lg space-y-2">
-						<div class="flex justify-between text-sm">
-							<span class="text-muted-foreground">Shares:</span>
-							<span class="font-semibold">{Math.floor(posResult.position_size)}</span>
+					<div class="mt-4 space-y-3">
+						<div class="text-center p-4 bg-primary/10 rounded-xl">
+							<div class="text-3xl font-bold">{Math.floor(posResult.position_size)}</div>
+							<div class="text-xs text-muted-foreground mt-1">Shares</div>
 						</div>
-						<div class="flex justify-between text-sm">
-							<span class="text-muted-foreground">Risk Amount:</span>
-							<span class="font-semibold">{formatCurrency(posResult.risk_amount)}</span>
+						<div class="grid grid-cols-2 gap-2">
+							<div class="p-2 bg-muted/50 rounded-lg text-center">
+								<div class="text-sm font-bold text-red-500">{formatCurrency(posResult.risk_amount)}</div>
+								<div class="text-[10px] text-muted-foreground">Risk Amount</div>
+							</div>
+							<div class="p-2 bg-muted/50 rounded-lg text-center">
+								<div class="text-sm font-bold">{formatCurrency(posResult.position_value)}</div>
+								<div class="text-[10px] text-muted-foreground">Position Value</div>
+							</div>
 						</div>
-						<div class="flex justify-between text-sm">
-							<span class="text-muted-foreground">Position Value:</span>
-							<span class="font-semibold">{formatCurrency(posResult.position_value)}</span>
+						<!-- Account usage bar -->
+						<div>
+							<div class="flex justify-between text-[10px] text-muted-foreground mb-1">
+								<span>Account Usage</span>
+								<span>{posAccountPercent.toFixed(1)}%</span>
+							</div>
+							<div class="h-2 bg-muted rounded-full overflow-hidden">
+								<div
+									class="h-full rounded-full transition-all {posAccountPercent > 50 ? 'bg-red-500' : posAccountPercent > 25 ? 'bg-yellow-500' : 'bg-green-500'}"
+									style="width: {Math.min(posAccountPercent, 100)}%"
+								></div>
+							</div>
 						</div>
 					</div>
 				{/if}
@@ -132,20 +178,31 @@
 				</Button>
 
 				{#if rrResult}
-					<div class="mt-4 p-3 bg-muted rounded-lg space-y-2">
-						<div class="flex justify-between text-sm">
-							<span class="text-muted-foreground">R:R Ratio:</span>
-							<span class="font-semibold text-lg">
+					<div class="mt-4 space-y-3">
+						<div class="text-center p-4 bg-primary/10 rounded-xl">
+							<div class="text-3xl font-bold {rrColor}">
 								{rrResult.risk_reward_ratio ? `1:${rrResult.risk_reward_ratio.toFixed(2)}` : 'N/A'}
-							</span>
+							</div>
+							<div class="text-xs text-muted-foreground mt-1">Risk : Reward</div>
 						</div>
-						<div class="flex justify-between text-sm">
-							<span class="text-muted-foreground">Risk:</span>
-							<span class="font-semibold text-destructive">{formatCurrency(rrResult.risk_amount)}</span>
+						<!-- Visual R:R bar -->
+						<div class="relative h-8 rounded-lg overflow-hidden flex">
+							<div
+								class="bg-red-500/30 flex items-center justify-center text-xs font-medium"
+								style="width: {100 - rrBarWidth}%"
+							>
+								{formatCurrency(rrResult.risk_amount)}
+							</div>
+							<div
+								class="bg-green-500/30 flex items-center justify-center text-xs font-medium"
+								style="width: {rrBarWidth}%"
+							>
+								{formatCurrency(rrResult.reward_amount)}
+							</div>
 						</div>
-						<div class="flex justify-between text-sm">
-							<span class="text-muted-foreground">Reward:</span>
-							<span class="font-semibold text-green-600">{formatCurrency(rrResult.reward_amount)}</span>
+						<div class="flex justify-between text-[10px] text-muted-foreground">
+							<span>Risk</span>
+							<span>Reward</span>
 						</div>
 					</div>
 				{/if}
@@ -175,21 +232,38 @@
 				</Button>
 
 				{#if kellyResult}
-					<div class="mt-4 p-3 bg-muted rounded-lg space-y-2">
-						<div class="flex justify-between text-sm">
-							<span class="text-muted-foreground">Full Kelly:</span>
-							<span class="font-semibold">{kellyResult.kelly_percentage.toFixed(2)}%</span>
+					<div class="mt-4 space-y-3">
+						<div class="text-center p-4 bg-primary/10 rounded-xl">
+							<div class="text-3xl font-bold {kellyColor}">
+								{kellyResult.half_kelly.toFixed(2)}%
+							</div>
+							<div class="text-xs text-muted-foreground mt-1">Half Kelly (Recommended)</div>
 						</div>
-						<div class="flex justify-between text-sm">
-							<span class="text-muted-foreground">Half Kelly:</span>
-							<span class="font-semibold text-green-600">{kellyResult.half_kelly.toFixed(2)}%</span>
+						<div class="grid grid-cols-2 gap-2">
+							<div class="p-2 bg-muted/50 rounded-lg text-center">
+								<div class="text-sm font-bold">{kellyResult.kelly_percentage.toFixed(2)}%</div>
+								<div class="text-[10px] text-muted-foreground">Full Kelly</div>
+							</div>
+							<div class="p-2 bg-muted/50 rounded-lg text-center">
+								<div class="text-sm font-bold">{kellyResult.quarter_kelly.toFixed(2)}%</div>
+								<div class="text-[10px] text-muted-foreground">Quarter Kelly</div>
+							</div>
 						</div>
-						<div class="flex justify-between text-sm">
-							<span class="text-muted-foreground">Quarter Kelly:</span>
-							<span class="font-semibold">{kellyResult.quarter_kelly.toFixed(2)}%</span>
+						<!-- Kelly gauge bar -->
+						<div>
+							<div class="flex justify-between text-[10px] text-muted-foreground mb-1">
+								<span>Conservative</span>
+								<span>Aggressive</span>
+							</div>
+							<div class="h-3 bg-gradient-to-r from-green-500/30 via-yellow-500/30 to-red-500/30 rounded-full relative">
+								<div
+									class="absolute top-0 w-3 h-3 bg-white rounded-full border-2 border-primary shadow"
+									style="left: clamp(0%, {Math.min(kellyResult.half_kelly / 20 * 100, 100)}%, calc(100% - 12px))"
+								></div>
+							</div>
 						</div>
-						<p class="text-xs text-muted-foreground mt-2">
-							Half Kelly is recommended for most traders as it balances growth with drawdown protection.
+						<p class="text-xs text-muted-foreground">
+							Half Kelly balances growth with drawdown protection. Quarter Kelly is safest.
 						</p>
 					</div>
 				{/if}
